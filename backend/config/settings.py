@@ -3,16 +3,17 @@ Django settings for the Wellness Centre Analytics Dashboard.
 SQLite by default; switch to Postgres via DATABASE_URL.
 """
 
+import os
 from datetime import timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = "django-insecure-&r9@v4qy$xmd!p=j_4z)-=36@keq+j_5@s8)e9wndbktx*8p0$"
+SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-&r9@v4qy$xmd!p=j_4z)-=36@keq+j_5@s8)e9wndbktx*8p0$")
 
-DEBUG = True
+DEBUG = os.environ.get("DEBUG", "True").lower() in ("true", "1", "yes")
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "*").split(",")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -28,6 +29,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -35,8 +37,9 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "wellness.middleware.DevBypassMiddleware",
 ]
+if DEBUG:
+    MIDDLEWARE.append("wellness.middleware.DevBypassMiddleware")
 
 ROOT_URLCONF = "config.urls"
 
@@ -63,6 +66,13 @@ DATABASES = {
         "NAME": BASE_DIR / "db.sqlite3",
     }
 }
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if DATABASE_URL:
+    import dj_database_url
+    DATABASES = {
+        "default": dj_database_url.parse(DATABASE_URL, conn_max_age=600),
+    }
 
 AUTH_USER_MODEL = "wellness.User"
 
@@ -95,12 +105,19 @@ CORS_ALLOWED_ORIGINS = [
 ]
 CORS_ALLOW_ALL_ORIGINS = True  # dev convenience; restrict before deploy
 
+_frontend_url = os.environ.get("FRONTEND_URL")
+if _frontend_url:
+    CORS_ALLOWED_ORIGINS = [_frontend_url]
+    CORS_ALLOW_ALL_ORIGINS = False
+
 # ---------------------------------------------------------------------------
 # DRF + JWT
 # ---------------------------------------------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "wellness.middleware.DevBypassAuthentication",
+        ["wellness.middleware.DevBypassAuthentication"]
+        if DEBUG
+        else ["rest_framework_simplejwt.authentication.JWTAuthentication"]
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.AllowAny",
@@ -113,6 +130,15 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=8),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "AUTH_HEADER_TYPES": ("Bearer",),
+}
+
+# Static files
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STATIC_URL = "static/"
+STORAGES = {
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
 }
 
 # Cached previews for the import preview -> confirm flow (locmem for dev).

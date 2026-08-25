@@ -25,5 +25,6 @@ urlpatterns = [
     path("reports/generate", views.ReportGenerateView.as_view(), name="report-generate"),
     path("reports/build", views.ReportCenterView.as_view(), name="report-center"),
     path("assistant/chat", views.AssistantView.as_view(), name="assistant-chat"),
+    path("assistant/upload", views.AssistantUploadView.as_view(), name="assistant-upload"),
 ]
 

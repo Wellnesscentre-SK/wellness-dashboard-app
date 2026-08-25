@@ -7,11 +7,19 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Bypass authentication entirely
-    localStorage.removeItem('access')
-    localStorage.removeItem('refresh')
-    setUser({ username: 'superadmin', role: 'admin' })
-    setLoading(false)
+    const token = localStorage.getItem('access')
+    if (token) {
+      client.get('/auth/me')
+        .then(({ data }) => setUser(data))
+        .catch(() => {
+          localStorage.removeItem('access')
+          localStorage.removeItem('refresh')
+          setUser(null)
+        })
+        .finally(() => setLoading(false))
+    } else {
+      setLoading(false)
+    }
   }, [])
 
   const login = useCallback(async (username, password) => {

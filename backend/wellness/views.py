@@ -907,6 +907,26 @@ class AssistantView(APIView):
         return Response({"status": approved.get("status", "unknown")})
 
 
+class AssistantUploadView(APIView):
+    """Accept a file upload for the AI assistant context."""
+
+    def post(self, request):
+        file = request.FILES.get("file")
+        if not file:
+            return _error("MISSING_FILE", "No file was uploaded.")
+        if not file.name.lower().endswith((".xlsx", ".xls", ".csv")):
+            return _error("INVALID_FILE_TYPE", "Only Excel/CSV files are supported.")
+
+        data = file.read()
+        try:
+            report = P.parse_excel(data)
+            rows = sum(len(s.rows) for s in report.sheets)
+        except Exception:
+            rows = 0
+
+        return Response({"rows": rows, "filename": file.name, "status": "processed"})
+
+
 class ReportCenterView(APIView):
     """Separate Weekly / Monthly / Yearly report modules.
 

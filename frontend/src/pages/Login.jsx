@@ -38,7 +38,7 @@ export default function Login() {
           <h1 className="text-xl font-semibold text-slate-900">Wellness Centre Analytics</h1>
           <p className="text-sm text-slate-500 mt-1">Sign in to the admin dashboard</p>
           <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-indigo-900">
-            Demo login: <span className="font-semibold">superadmin</span> / <span className="font-semibold">Passw0rd!</span>
+            Demo login: <span className="font-semibold">admin</span> / <span className="font-semibold">wellness2026</span>
           </div>
         </div>
         <form onSubmit={submit} className="space-y-4">

@@ -379,9 +379,15 @@ def _coerce_cell(value, field: str):
         return 0, f"{field}: value is missing or not a number."
     if isinstance(value, str):
         s = value.strip()
-        if s == "":
+        if s == "" or s == "-":
             return 0, f"{field}: value is missing or not a number."
-        return 0, f"{field}: value is missing or not a number."
+        try:
+            n = int(float(s))
+            if n < 0:
+                return 0, f"{field}: negative values aren't allowed."
+            return n, None
+        except (ValueError, OverflowError):
+            return 0, f"{field}: value is missing or not a number."
     if isinstance(value, float):
         if value < 0:
             return 0, f"{field}: negative values aren't allowed."

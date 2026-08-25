@@ -463,7 +463,7 @@ export default function ManualEntry() {
     setSheetData(emptySheetState())
     setResetNonce((n) => n + 1)
     setHasUnsavedChanges(true)
-    setSuccessMsg('')
+    setSuccessMsg('Worksheet reset to zero. Click Save to persist, or reload to restore original data.')
     setError('')
   }
 
@@ -568,9 +568,11 @@ export default function ManualEntry() {
     } catch (err) {
       const code = err?.response?.data?.error
       if (code === 'ROW_VALIDATION_FAILED' && !force) {
+        setError('')
         setSaveWarningModal(true)
+      } else {
+        setError(apiError(err))
       }
-      setError(apiError(err))
     } finally {
       setSaving(false)
     }
@@ -940,7 +942,7 @@ export default function ManualEntry() {
 
             <button
               onClick={() => handleSaveWorksheet(false)}
-              disabled={saving || !hasUnsavedChanges}
+              disabled={saving || !selectedPeriodId}
               className="mt-5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-40 transition-all shadow-md flex items-center gap-2"
             >
               {saving ? <Spinner /> : '💾'} Save Worksheet
@@ -948,7 +950,7 @@ export default function ManualEntry() {
 
             <button
               onClick={resetWorksheet}
-              disabled={!hasUnsavedChanges}
+              disabled={!selectedPeriodId}
               className="mt-5 rounded-xl border border-rose-300 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-40 transition-all shadow-sm"
             >
               ↺ Reset Worksheet

@@ -182,7 +182,9 @@ def build_weekly_comparison(period_a, period_b, source_label="uploaded Wellness 
         b = _ensure_dict(period_b)
         return build_weekly(a, b)
     except Exception:
-        return _build_weekly_fallback(period_a, period_b, source_label)
+        a = _ensure_dict(period_a)
+        b = _ensure_dict(period_b)
+        return _build_weekly_fallback(a, b, source_label)
 
 
 def build_monthly_comparison(period_a, period_b, insights=None,
@@ -199,7 +201,9 @@ def build_monthly_comparison(period_a, period_b, insights=None,
                             for item in (insights if isinstance(insights, list) else [])]
         return build_monthly(a, b, key_insights=key_insights)
     except Exception:
-        return _build_monthly_fallback(period_a, period_b, insights, source_label)
+        a = _ensure_dict(period_a)
+        b = _ensure_dict(period_b)
+        return _build_monthly_fallback(a, b, insights, source_label)
 
 
 def build_yearly(periods_a, periods_b,
@@ -212,7 +216,9 @@ def build_yearly(periods_a, periods_b,
         b_list = _ensure_dicts(periods_b)
         return build_yearly_fn(a_list, b_list, fy1_label, fy2_label)
     except Exception:
-        return _build_yearly_fallback(periods_a, periods_b, fy1_label, fy2_label)
+        a_list = _ensure_dicts(periods_a)
+        b_list = _ensure_dicts(periods_b)
+        return _build_yearly_fallback(a_list, b_list, fy1_label, fy2_label)
 
 
 def build_normal_week(period, insights=None) -> bytes:
@@ -223,7 +229,8 @@ def build_normal_week(period, insights=None) -> bytes:
         data = _ensure_dict(period)
         return build_nw(data, insights=insights)
     except Exception:
-        return _build_normal_week_fallback(period)
+        data = _ensure_dict(period)
+        return _build_normal_week_fallback(data)
 
 
 def build_normal_monthly(period, insights=None) -> bytes:
@@ -234,7 +241,8 @@ def build_normal_monthly(period, insights=None) -> bytes:
         data = _ensure_dict(period)
         return build_nm(data, insights=insights)
     except Exception:
-        return _build_normal_monthly_fallback(period)
+        data = _ensure_dict(period)
+        return _build_normal_monthly_fallback(data)
 
 
 def build_normal_yearly(period, insights=None) -> bytes:
@@ -260,7 +268,11 @@ def build_normal_yearly(period, insights=None) -> bytes:
                 pool = [_ensure_dict(period)]
         return build_ny(pool, insights=insights)
     except Exception:
-        return _build_normal_yearly_fallback(period)
+        if isinstance(period, (list, tuple)):
+            pool = _ensure_dicts(period)
+        else:
+            pool = [_ensure_dict(period)]
+        return _build_normal_yearly_fallback(pool)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -396,12 +408,22 @@ def _insights(a, b, labels):
 
 
 def _build_weekly_fallback(period_a, period_b, source_label):
-    """Fallback weekly builder using matplotlib-based ppt.py reference."""
-    from wellness.services.reports.ppt import _period_data
-    a, b = _period_data(period_a), _period_data(period_b)
-    label_a = f"{_date_label(period_a.period_start)} to {_date_label(period_a.period_end)}"
-    label_b = f"{_date_label(period_b.period_start)} to {_date_label(period_b.period_end)}"
+    """Fallback weekly builder using dict data directly."""
+    a = _ensure_dict(period_a) if not isinstance(period_a, dict) else period_a
+    b = _ensure_dict(period_b) if not isinstance(period_b, dict) else period_b
+    start_a = a.get("start", "2000-01-01")[:10]
+    end_a = a.get("end", "2000-01-01")[:10]
+    start_b = b.get("start", "2000-01-01")[:10]
+    end_b = b.get("end", "2000-01-01")[:10]
+    from datetime import date as _date
+    label_a = f"{_date_label(_date.fromisoformat(start_a))} to {_date_label(_date.fromisoformat(end_a))}"
+    label_b = f"{_date_label(_date.fromisoformat(start_b))} to {_date_label(_date.fromisoformat(end_b))}"
     source = f"NEW CASES / FOLLOW-UP CASES | {source_label}"
+
+    def _vert_list(d):
+        raw = d.get("vertical") or {}
+        return [int(raw.get(v, {}).get("total", 0) or 0) for v in VERTICALS]
+
     prs = Presentation()
     prs.slide_width, prs.slide_height = SLIDE_W, SLIDE_H
     cover = _new_slide(prs)
@@ -421,18 +443,20 @@ def _build_weekly_fallback(period_a, period_b, source_label):
     _section(details, "WEEKLY DATA DETAILS", label_a, label_b)
     _footer(details, 3, source)
     from pptx.enum.chart import XL_CHART_TYPE
-    _pair_pies(prs, 4, "VERTICALS — NEW / FOLLOW UP", label_a, label_b, list(VERTICAL_LABELS), a["vertical_total"], b["vertical_total"], source)
-    _pair_pies(prs, 5, "STAKEHOLDER", label_a, label_b, legacy.STAKEHOLDERS, a["stakeholder"], b["stakeholder"], source)
-    _pair_pies(prs, 6, "RANGE OF CONCERN ADDRESSED", label_a, label_b, legacy.CONCERNS, a["concern"], b["concern"], source)
-    for page, title, labels, va, vb in (
-        (7, "Comparative data of cases", list(VERTICAL_LABELS), a["vertical_total"], b["vertical_total"]),
-        (8, "Comparative data towards Range of Concern addressed", legacy.CONCERNS, a["concern"], b["concern"]),
-        (9, "Comparative data of Stakeholders", legacy.STAKEHOLDERS, a["stakeholder"], b["stakeholder"]),
+    va = _vert_list(a)
+    vb = _vert_list(b)
+    _pair_pies(prs, 4, "VERTICALS — NEW / FOLLOW UP", label_a, label_b, list(VERTICAL_LABELS), va, vb, source)
+    _pair_pies(prs, 5, "STAKEHOLDER", label_a, label_b, legacy.STAKEHOLDERS, list(a["stakeholder"].values()), list(b["stakeholder"].values()), source)
+    _pair_pies(prs, 6, "RANGE OF CONCERN ADDRESSED", label_a, label_b, legacy.CONCERNS, list(a["concern"].values()), list(b["concern"].values()), source)
+    for page, title, labels_list, la, lb in (
+        (7, "Comparative data of cases", list(VERTICAL_LABELS), va, vb),
+        (8, "Comparative data towards Range of Concern addressed", legacy.CONCERNS, list(a["concern"].values()), list(b["concern"].values())),
+        (9, "Comparative data of Stakeholders", legacy.STAKEHOLDERS, list(a["stakeholder"].values()), list(b["stakeholder"].values())),
     ):
         slide = _new_slide(prs)
         _section(slide, title, label_a, label_b)
         _chart(slide, XL_CHART_TYPE.COLUMN_CLUSTERED, Inches(0.7), CHART_TOP, Inches(11.9), CHART_H,
-               labels, [(label_a, va), (label_b, vb)])
+               labels_list, [(label_a, la), (label_b, lb)])
         _footer(slide, page, source)
     points = _new_slide(prs)
     _text(points, MARGIN, Inches(0.35), Inches(12.5), Inches(0.45), "PROPOSED POINTS FROM WELLNESS CENTRE:", 18, color=RED, bold=True, align=PP_ALIGN.CENTER)
@@ -460,8 +484,11 @@ def _build_yearly_fallback(periods_a, periods_b, fy1_label, fy2_label):
 
 def _build_normal_week_fallback(period, source_label="uploaded Wellness Excel reports"):
     """Fallback single-week builder."""
-    d = _period_to_dict(period)
-    label = f"{_date_label(period.period_start)} to {_date_label(period.period_end)}"
+    d = _ensure_dict(period) if not isinstance(period, dict) else period
+    start = d.get("start", "2000-01-01")[:10]
+    end = d.get("end", "2000-01-01")[:10]
+    from datetime import date as _date
+    label = f"{_date_label(_date.fromisoformat(start))} to {_date_label(_date.fromisoformat(end))}"
     prs = Presentation()
     prs.slide_width, prs.slide_height = SLIDE_W, SLIDE_H
     cover = _new_slide(prs)
@@ -490,6 +517,10 @@ def _build_normal_monthly_fallback(period, source_label="uploaded Wellness Excel
     return _build_normal_week_fallback(period, source_label)
 
 
-def _build_normal_yearly_fallback(period, source_label="uploaded Wellness Excel reports"):
-    """Fallback single-year builder."""
+def _build_normal_yearly_fallback(periods, source_label="uploaded Wellness Excel reports"):
+    """Fallback single-year builder using first period dict for a basic report."""
+    if isinstance(periods, (list, tuple)) and periods:
+        period = periods[0]
+    else:
+        period = periods
     return _build_normal_week_fallback(period, source_label)

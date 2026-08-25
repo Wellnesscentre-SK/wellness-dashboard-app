@@ -78,6 +78,17 @@ export default function ReportsCenter() {
     setError('')
     try {
       const response = await client.post('/reports/build', payload, { responseType: 'blob' })
+      const ct = (response.headers['content-type'] || '').toLowerCase()
+      if (ct.includes('application/json') || ct.includes('text/')) {
+        try {
+          const text = await response.data.text()
+          const err = JSON.parse(text)
+          setError(err.message || err.detail || 'Generation failed.')
+        } catch {
+          setError('Generation failed.')
+        }
+        return
+      }
       let filename = 'report'
       const match = (response.headers['content-disposition'] || '').match(/filename="?([^";]+)"?/)
       if (match) filename = match[1]

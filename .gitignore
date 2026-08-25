@@ -10,3 +10,4 @@ dist/
 node_modules/
 .qodo/
 .design-tmp/
+_deploy/

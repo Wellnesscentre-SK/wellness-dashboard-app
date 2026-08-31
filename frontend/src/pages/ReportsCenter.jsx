@@ -78,7 +78,9 @@ export default function ReportsCenter() {
     setError('')
     try {
       const response = await client.post('/reports/build', payload, { responseType: 'blob' })
-      const ct = (response.headers['content-type'] || '').toLowerCase()
+      const ct = (response.headers['content-type'] || '').toLowerCase().split(';')[0].trim()
+
+      // If the server returned a JSON/text error, parse and show it
       if (ct.includes('application/json') || ct.includes('text/')) {
         try {
           const text = await response.data.text()
@@ -89,21 +91,46 @@ export default function ReportsCenter() {
         }
         return
       }
+
+      // --- Determine correct file extension ---
       let filename = 'report'
-      const match = (response.headers['content-disposition'] || '').match(/filename="?([^";]+)"?/)
-      if (match && match[1]) filename = match[1]
-      // If the server didn't expose a filename, never leave the file extension-less
-      // (an extension-less download is what made it look like a plain "TXT" file).
+      const disposition = response.headers['content-disposition'] || ''
+      const match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+      if (match && match[1]) filename = match[1].replace(/['"]/g, '').trim()
+
+      // Determine MIME type for the Blob and correct extension
+      let mimeType = ct || 'application/octet-stream'
       const ext = (filename.split('.').pop() || '').toLowerCase()
-      if (!ext || !['pptx', 'xlsx', 'ppt', 'xls'].includes(ext)) {
-        if (ct.includes('vnd.openxmlformats-officedocument.presentationml')) filename += '.pptx'
-        else if (ct.includes('spreadsheetml')) filename += '.xlsx'
-        else if (ct.includes('presentationml')) filename += '.pptx'
-        else if (ct.includes('application/vnd.ms-excel') || ct.includes('application/vnd.ms-powerpoint')) {
-          filename += (ct.includes('excel') ? '.xls' : '.ppt')
+      const knownExts = ['pptx', 'xlsx', 'ppt', 'xls']
+
+      // Infer extension from content-type if missing or wrong
+      if (!knownExts.includes(ext)) {
+        if (ct.includes('presentationml') || ct.includes('powerpoint')) {
+          filename = filename.replace(/\.[^.]*$/, '') + '.pptx'
+          mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        } else if (ct.includes('spreadsheetml') || ct.includes('excel')) {
+          filename = filename.replace(/\.[^.]*$/, '') + '.xlsx'
+          mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        } else {
+          // Last-resort fallback: infer from the payload's format field
+          const fmt = String(payload.format || 'ppt').toLowerCase()
+          if (fmt === 'xlsx') {
+            filename = (filename === 'report' ? 'report' : filename.replace(/\.[^.]*$/, '')) + '.xlsx'
+            mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          } else {
+            filename = (filename === 'report' ? 'report' : filename.replace(/\.[^.]*$/, '')) + '.pptx'
+            mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+          }
         }
+      } else {
+        // Known extension – ensure mimeType matches
+        if (ext === 'pptx') mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        else if (ext === 'xlsx') mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       }
-      const url = URL.createObjectURL(new Blob([response.data]))
+
+      // Trigger download with proper MIME type so OS opens it correctly
+      const blob = new Blob([response.data], { type: mimeType })
+      const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
       a.download = filename

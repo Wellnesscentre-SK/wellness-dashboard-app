@@ -34,16 +34,43 @@ from pptx.util import Inches, Pt  # noqa: E402
 
 
 def _import_ppt_module(mod_name):
-    """Import a ppt_generator module without Django's config namespace collision."""
-    saved = {}
+    """Import a ppt_generator module without Django's config namespace collision.
+
+    Evicts ALL ppt_generator modules (config, components, weekly, monthly …)
+    from sys.modules so that they always re-import against ppt_generator/config.py
+    instead of Django's config module.  The Django config keys are restored
+    afterward to leave the rest of the server unaffected.
+    """
+    import importlib
+
+    # Modules that live inside ppt_generator and use `import config as C`
+    _PPT_MODULES = {
+        "config", "components", "weekly", "monthly", "yearly",
+        "normal_week", "normal_monthly", "normal_yearly",
+        "template_slides", "runner",
+    }
+
+    # 1. Save + evict Django's config so it can't bleed into ppt_generator imports.
+    saved_django_cfg = {}
     for key in list(sys.modules):
         if key == "config" or key.startswith("config."):
-            saved[key] = sys.modules.pop(key)
+            saved_django_cfg[key] = sys.modules.pop(key)
+
+    # 2. Evict any previously cached ppt_generator modules so they are re-imported
+    #    fresh (this forces `components.py` to re-execute its module-level
+    #    `import config as C`, which now picks up ppt_generator/config.py).
+    evicted_ppt = {}
+    for key in list(sys.modules):
+        if key in _PPT_MODULES:
+            evicted_ppt[key] = sys.modules.pop(key)
+
     try:
-        import importlib
-        return importlib.import_module(mod_name)
+        mod = importlib.import_module(mod_name)
+        return mod
     finally:
-        sys.modules.update(saved)
+        # 3. Restore Django's config (never the ppt_generator ones – let them
+        #    be re-evicted on the next call so the fix is always consistent).
+        sys.modules.update(saved_django_cfg)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -91,7 +91,18 @@ export default function ReportsCenter() {
       }
       let filename = 'report'
       const match = (response.headers['content-disposition'] || '').match(/filename="?([^";]+)"?/)
-      if (match) filename = match[1]
+      if (match && match[1]) filename = match[1]
+      // If the server didn't expose a filename, never leave the file extension-less
+      // (an extension-less download is what made it look like a plain "TXT" file).
+      const ext = (filename.split('.').pop() || '').toLowerCase()
+      if (!ext || !['pptx', 'xlsx', 'ppt', 'xls'].includes(ext)) {
+        if (ct.includes('vnd.openxmlformats-officedocument.presentationml')) filename += '.pptx'
+        else if (ct.includes('spreadsheetml')) filename += '.xlsx'
+        else if (ct.includes('presentationml')) filename += '.pptx'
+        else if (ct.includes('application/vnd.ms-excel') || ct.includes('application/vnd.ms-powerpoint')) {
+          filename += (ct.includes('excel') ? '.xls' : '.ppt')
+        }
+      }
       const url = URL.createObjectURL(new Blob([response.data]))
       const a = document.createElement('a')
       a.href = url

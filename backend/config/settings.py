@@ -110,6 +110,17 @@ if _frontend_url:
     CORS_ALLOWED_ORIGINS = [_frontend_url]
     CORS_ALLOW_ALL_ORIGINS = False
 
+# Expose file-download headers to the browser so the Report Center can read the
+# real filename / content-type. Without this, Content-Disposition (and a
+# non-safelisted Content-Type like the pptx/xlsx MIME) are hidden from JS and
+# the frontend falls back to an extension-less filename that the OS treats as
+# plain text ("TXT" file) instead of a proper .pptx / .xlsx download.
+CORS_EXPOSE_HEADERS = [
+    "Content-Disposition",
+    "Content-Type",
+    "Content-Length",
+]
+
 # ---------------------------------------------------------------------------
 # DRF + JWT
 # ---------------------------------------------------------------------------

@@ -13,16 +13,27 @@ import json
 import os
 import urllib.request
 import urllib.error
+from time import monotonic
 
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "openai/gpt-oss-20b:free"
-# Free-tier models are individually rate-limited; fall through on 402/429/404.
+DEFAULT_MODEL = "minimax/minimax-m3:free"
+# Free-tier models churn quickly (de-listed, rate-limited, or turned paid).
+# minimax/m3 returns clean, fast, well-formatted insight text without a
+# reasoning chain; the OpenRouter free router ("openrouter/free") is a stable
+# catch-all that auto-selects an available model if the specific ones are busy.
 MODEL_FALLBACKS = [
     DEFAULT_MODEL,
-    "google/gemma-4-31b-it:free",
     "nvidia/nemotron-3.5-lightning:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "openrouter/free",
 ]
+# Cap the whole AI-insight call so a slow / rate-limited provider can never
+# stall the PPT build into a request timeout / "Network Error". Each attempt
+# is given only the remaining budget (see chat()), so the total is strictly
+# bounded by this value; on exceeding it the caller falls back to rule-based
+# insights. Kept small so the PPT always builds in a few seconds.
+MAX_TOTAL_SECONDS = 5
 
 
 def _get_api_key():
@@ -54,16 +65,25 @@ def chat(messages: list, model: str = None, temperature: float = 0.3,
     if not api_key:
         return ""
 
+    # Hard budget so a slow / rate-limited provider can never stall the
+    # whole PPT build (which would otherwise time out into a "Network Error").
+    deadline = monotonic() + MAX_TOTAL_SECONDS
     chain = [model] if model else list(MODEL_FALLBACKS)
     for m in chain:
-        result = _chat_once(api_key, m, messages, temperature, max_tokens)
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            break
+        # Each attempt may block up to its own timeout, so cap it to the
+        # remaining budget to guarantee the total never exceeds MAX_TOTAL_SECONDS.
+        result = _chat_once(api_key, m, messages, temperature, max_tokens,
+                            timeout=min(20, remaining))
         if result:
             return result
     return ""
 
 
 def _chat_once(api_key: str, model: str, messages: list, temperature: float,
-               max_tokens: int) -> str:
+               max_tokens: int, timeout: int = 20) -> str:
     payload = json.dumps({
         "model": model,
         "messages": messages,
@@ -84,7 +104,7 @@ def _chat_once(api_key: str, model: str, messages: list, temperature: float,
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
             data = json.loads(raw)
             content = data["choices"][0]["message"]["content"]

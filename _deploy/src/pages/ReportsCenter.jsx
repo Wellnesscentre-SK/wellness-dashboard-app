@@ -73,15 +73,71 @@ export default function ReportsCenter() {
     (m) => `${year}-${String(m.month).padStart(2, '0')}` === monthKey,
   )
 
+  // A year change replaces every option list. Clear selections that belong to
+  // the previous year so Compare can never submit stale period IDs.
+  useEffect(() => {
+    setWeekId('')
+    setMonthKey('')
+    setCmpWeekA('')
+    setCmpWeekB('')
+    setCmpMonthA('')
+    setCmpMonthB('')
+  }, [year])
+
   const download = async (payload, busyKey) => {
     setBusy(busyKey)
     setError('')
     try {
       const response = await client.post('/reports/build', payload, { responseType: 'blob' })
-      let filename = 'report'
-      const match = (response.headers['content-disposition'] || '').match(/filename="?([^";]+)"?/)
-      if (match) filename = match[1]
-      const url = URL.createObjectURL(new Blob([response.data]))
+
+      // PPTX and XLSX are ZIP archives. Validate the signature so a JSON error
+      // response can never be downloaded as an extensionless TXT file.
+      const arrayBuf = response.data instanceof Blob
+        ? await response.data.arrayBuffer()
+        : response.data instanceof ArrayBuffer
+          ? response.data
+          : await new Blob([response.data]).arrayBuffer()
+      const header = new Uint8Array(arrayBuf, 0, 2)
+      const isPK = header[0] === 0x50 && header[1] === 0x4B
+
+      if (!isPK) {
+        try {
+          const text = new TextDecoder().decode(arrayBuf)
+          const err = JSON.parse(text)
+          setError(err.message || err.detail || 'Generation failed.')
+        } catch {
+          setError('Generation failed.')
+        }
+        return
+      }
+
+      const isCompare = !!payload.compare
+      const fmt = isCompare ? 'ppt' : String(payload.format || 'ppt').toLowerCase()
+      const isExcel = fmt === 'xlsx'
+      const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+      const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      const mimeType = isExcel ? XLSX_MIME : PPTX_MIME
+      const ext = isExcel ? '.xlsx' : '.pptx'
+
+      let filename = ''
+      try {
+        const cd = response.headers['content-disposition'] || ''
+        const match = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+        if (match && match[1]) filename = match[1].replace(/["']/g, '').trim()
+      } catch { /* header not readable in production */ }
+
+      if (!filename || !/\.(pptx|xlsx|ppt|xls)$/i.test(filename)) {
+        if (isCompare) {
+          filename = `compare_${payload.compare?.type || 'period'}${ext}`
+        } else {
+          const rtype = payload.report_type || 'report'
+          const yr = payload.year || ''
+          const mo = payload.month ? String(payload.month).padStart(2, '0') : ''
+          filename = [rtype, yr, mo].filter(Boolean).join('_') + ext
+        }
+      }
+
+      const url = URL.createObjectURL(new Blob([arrayBuf], { type: mimeType }))
       const a = document.createElement('a')
       a.href = url
       a.download = filename

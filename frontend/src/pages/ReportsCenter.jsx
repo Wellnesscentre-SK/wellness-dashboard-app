@@ -73,6 +73,17 @@ export default function ReportsCenter() {
     (m) => `${year}-${String(m.month).padStart(2, '0')}` === monthKey,
   )
 
+  // A year change replaces every option list. Clear selections that belong to
+  // the previous year so Compare can never submit stale period IDs.
+  useEffect(() => {
+    setWeekId('')
+    setMonthKey('')
+    setCmpWeekA('')
+    setCmpWeekB('')
+    setCmpMonthA('')
+    setCmpMonthB('')
+  }, [year])
+
   const download = async (payload, busyKey) => {
     setBusy(busyKey)
     setError('')
@@ -83,7 +94,11 @@ export default function ReportsCenter() {
       // PPTX and XLSX are ZIP archives: first 2 bytes are always 'PK' (0x50 0x4B).
       // If the bytes are NOT 'PK', the server returned a JSON error body instead of
       // a file (this is the CORS production bug: content-type header is unreadable).
-      const arrayBuf = await response.data.arrayBuffer()
+      const arrayBuf = response.data instanceof Blob
+        ? await response.data.arrayBuffer()
+        : response.data instanceof ArrayBuffer
+          ? response.data
+          : await new Blob([response.data]).arrayBuffer()
       const header = new Uint8Array(arrayBuf, 0, 2)
       const isPK = header[0] === 0x50 && header[1] === 0x4B
 

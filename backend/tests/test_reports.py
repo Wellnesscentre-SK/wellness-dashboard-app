@@ -264,3 +264,32 @@ class TestReportEndpoint:
         c = APIClient()
         c.force_authenticate(user=admin_user)
         assert c.post("/api/reports/generate", {"period_id": 999}, format="json").status_code == 400
+
+
+class TestReportCenter:
+    def test_single_reports_are_real_office_files(self, weekly_pair):
+        from wellness.services.reports import report_center
+
+        period, _ = weekly_pair
+        for fmt, extension, content_type in (
+            ("ppt", ".pptx", "presentationml"),
+            ("xlsx", ".xlsx", "spreadsheetml"),
+        ):
+            filename, data, actual_type, source_ids = report_center.build_single(
+                "weekly", fmt, period_id=period.id,
+            )
+            assert filename.endswith(extension)
+            assert data[:2] == b"PK"
+            assert content_type in actual_type
+            assert source_ids == [period.id]
+
+    def test_week_compare_generates_pptx(self, weekly_pair):
+        from wellness.services.reports import report_center
+
+        first, second = weekly_pair
+        filename, data, content_type = report_center.build_compare(
+            "week", "ppt", from_id=first.id, to_id=second.id,
+        )
+        assert filename.endswith(".pptx")
+        assert data[:2] == b"PK"
+        assert content_type.endswith("presentationml.presentation")

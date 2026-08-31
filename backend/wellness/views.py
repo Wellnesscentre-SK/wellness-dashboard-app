@@ -950,6 +950,26 @@ class ReportCenterView(APIView):
         from wellness.services.reports import report_center
         from wellness.services.persistence import log_audit
 
+        def file_response(data_bytes, filename, content_type):
+            """Return a browser-readable Office download.
+
+            ``Content-Disposition`` and the Office ``Content-Type`` are not
+            CORS-safelisted headers.  The global CORS setting exposes them,
+            but setting the header on this response as well keeps downloads
+            correct when this endpoint is served behind a proxy that strips
+            the CORS middleware's response decoration.  The frontend also
+            validates the ZIP signature and has a filename fallback, so both
+            sides remain safe if a deployment has stale CORS configuration.
+            """
+            response = FileResponse(
+                io.BytesIO(data_bytes), as_attachment=True,
+                filename=filename, content_type=content_type,
+            )
+            response["Access-Control-Expose-Headers"] = (
+                "Content-Disposition, Content-Type, Content-Length"
+            )
+            return response
+
         data = request.data or {}
         fmt = str(data.get("format") or "ppt").lower()
         if fmt not in ("ppt", "xlsx"):
@@ -972,8 +992,7 @@ class ReportCenterView(APIView):
             log_audit(request.user, "report_generated", "period", 0,
                       {"format": "comparison_ppt", "filename": filename,
                        "module": f"report-center-{ctype}"})
-            return FileResponse(io.BytesIO(data_bytes), as_attachment=True,
-                                filename=filename, content_type=content_type)
+            return file_response(data_bytes, filename, content_type)
 
         report_type = str(data.get("report_type") or "").lower()
         if report_type not in ("weekly", "monthly", "yearly"):
@@ -994,5 +1013,4 @@ class ReportCenterView(APIView):
                   {"format": fmt, "filename": filename,
                    "module": f"report-center-{report_type}",
                    "sources_merged": len(source_ids)})
-        return FileResponse(io.BytesIO(data_bytes), as_attachment=True,
-                            filename=filename, content_type=content_type)
+        return file_response(data_bytes, filename, content_type)

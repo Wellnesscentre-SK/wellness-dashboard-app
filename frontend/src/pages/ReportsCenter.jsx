@@ -78,12 +78,19 @@ export default function ReportsCenter() {
     setError('')
     try {
       const response = await client.post('/reports/build', payload, { responseType: 'blob' })
-      const ct = (response.headers['content-type'] || '').toLowerCase().split(';')[0].trim()
 
-      // If the server returned a JSON/text error, parse and show it
-      if (ct.includes('application/json') || ct.includes('text/')) {
+      // ── Sniff the response bytes ──────────────────────────────────────────
+      // PPTX and XLSX are ZIP archives: first 2 bytes are always 'PK' (0x50 0x4B).
+      // If the bytes are NOT 'PK', the server returned a JSON error body instead of
+      // a file (this is the CORS production bug: content-type header is unreadable).
+      const arrayBuf = await response.data.arrayBuffer()
+      const header = new Uint8Array(arrayBuf, 0, 2)
+      const isPK = header[0] === 0x50 && header[1] === 0x4B
+
+      if (!isPK) {
+        // Not a ZIP — must be a JSON/text error from the server
         try {
-          const text = await response.data.text()
+          const text = new TextDecoder().decode(arrayBuf)
           const err = JSON.parse(text)
           setError(err.message || err.detail || 'Generation failed.')
         } catch {
@@ -92,44 +99,39 @@ export default function ReportsCenter() {
         return
       }
 
-      // --- Determine correct file extension ---
-      let filename = 'report'
-      const disposition = response.headers['content-disposition'] || ''
-      const match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
-      if (match && match[1]) filename = match[1].replace(/['"]/g, '').trim()
+      // ── Determine filename + MIME type from the payload (no headers needed) ─
+      const isCompare = !!payload.compare
+      const fmt = isCompare ? 'ppt' : String(payload.format || 'ppt').toLowerCase()
+      const isExcel = fmt === 'xlsx'
 
-      // Determine MIME type for the Blob and correct extension
-      let mimeType = ct || 'application/octet-stream'
-      const ext = (filename.split('.').pop() || '').toLowerCase()
-      const knownExts = ['pptx', 'xlsx', 'ppt', 'xls']
+      const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+      const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      const mimeType = isExcel ? XLSX_MIME : PPTX_MIME
+      const ext = isExcel ? '.xlsx' : '.pptx'
 
-      // Infer extension from content-type if missing or wrong
-      if (!knownExts.includes(ext)) {
-        if (ct.includes('presentationml') || ct.includes('powerpoint')) {
-          filename = filename.replace(/\.[^.]*$/, '') + '.pptx'
-          mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
-        } else if (ct.includes('spreadsheetml') || ct.includes('excel')) {
-          filename = filename.replace(/\.[^.]*$/, '') + '.xlsx'
-          mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      // Try to read filename from Content-Disposition (works locally / if CORS exposes it).
+      // Fall back to a clean generated name derived from the payload.
+      let filename = ''
+      try {
+        const cd = response.headers['content-disposition'] || ''
+        const m = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+        if (m && m[1]) filename = m[1].replace(/['"]/g, '').trim()
+      } catch { /* header not readable in production */ }
+
+      if (!filename || !/\.(pptx|xlsx|ppt|xls)$/i.test(filename)) {
+        if (isCompare) {
+          const ctype = payload.compare?.type || 'period'
+          filename = `compare_${ctype}${ext}`
         } else {
-          // Last-resort fallback: infer from the payload's format field
-          const fmt = String(payload.format || 'ppt').toLowerCase()
-          if (fmt === 'xlsx') {
-            filename = (filename === 'report' ? 'report' : filename.replace(/\.[^.]*$/, '')) + '.xlsx'
-            mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-          } else {
-            filename = (filename === 'report' ? 'report' : filename.replace(/\.[^.]*$/, '')) + '.pptx'
-            mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
-          }
+          const rtype = payload.report_type || 'report'
+          const yr = payload.year || ''
+          const mo = payload.month ? String(payload.month).padStart(2, '0') : ''
+          filename = [rtype, yr, mo].filter(Boolean).join('_') + ext
         }
-      } else {
-        // Known extension – ensure mimeType matches
-        if (ext === 'pptx') mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
-        else if (ext === 'xlsx') mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       }
 
-      // Trigger download with proper MIME type so OS opens it correctly
-      const blob = new Blob([response.data], { type: mimeType })
+      // ── Trigger the download ────────────────────────────────────────────────
+      const blob = new Blob([arrayBuf], { type: mimeType })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -156,6 +158,7 @@ export default function ReportsCenter() {
     }
     return apiError(e)
   }
+
 
   if (loading) return <Spinner label="Loading report modules…" />
 

@@ -276,7 +276,7 @@ export default function ReportsCenter() {
                 {weeksForYear.map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
               </select>
             </div>
-            <button className={`${btnCompare} mt-4`} disabled={!cmpWeekA || !cmpWeekB || !!busy}
+            <button className={`${btnCompare} mt-4`} disabled={!cmpWeekA || !cmpWeekB || cmpWeekA === cmpWeekB || !!busy}
               onClick={() => download({ compare: { type: 'week', from_id: Number(cmpWeekA), to_id: Number(cmpWeekB) } }, 'wk-cmp')}>
               {busy === 'wk-cmp' ? 'Comparing…' : '⚖️ Compare PPT'}
             </button>
@@ -333,7 +333,7 @@ export default function ReportsCenter() {
                 {allMonthKeys.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
               </select>
             </div>
-            <button className={`${btnCompare} mt-4`} disabled={!cmpMonthA || !cmpMonthB || !!busy}
+            <button className={`${btnCompare} mt-4`} disabled={!cmpMonthA || !cmpMonthB || cmpMonthA === cmpMonthB || !!busy}
               onClick={() => download({ compare: { type: 'month', from_month: cmpMonthA, to_month: cmpMonthB } }, 'mo-cmp')}>
               {busy === 'mo-cmp' ? 'Comparing…' : '⚖️ Compare PPT'}
             </button>
@@ -381,7 +381,7 @@ export default function ReportsCenter() {
                 {years.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
-            <button className={`${btnCompare} mt-4`} disabled={!cmpYearA || !cmpYearB || !!busy}
+            <button className={`${btnCompare} mt-4`} disabled={!cmpYearA || !cmpYearB || cmpYearA === cmpYearB || !!busy}
               onClick={() => download({ compare: { type: 'year', from_year: Number(cmpYearA), to_year: Number(cmpYearB) } }, 'yr-cmp')}>
               {busy === 'yr-cmp' ? 'Comparing…' : '⚖️ Compare PPT'}
             </button>

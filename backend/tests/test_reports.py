@@ -267,6 +267,41 @@ class TestReportEndpoint:
 
 
 class TestReportCenter:
+    def _client(self, admin_user):
+        from rest_framework.test import APIClient
+
+        client = APIClient()
+        client.force_authenticate(user=admin_user)
+        return client
+
+    def test_http_exports_have_office_content_type_and_filename(self, admin_user, weekly_pair):
+        first, second = weekly_pair
+        client = self._client(admin_user)
+
+        for payload, extension, content_type in (
+            (
+                {"report_type": "weekly", "format": "ppt", "period_id": first.id},
+                ".pptx",
+                "presentationml.presentation",
+            ),
+            (
+                {"report_type": "weekly", "format": "xlsx", "period_id": first.id},
+                ".xlsx",
+                "spreadsheetml.sheet",
+            ),
+            (
+                {"compare": {"type": "week", "from_id": first.id, "to_id": second.id}},
+                ".pptx",
+                "presentationml.presentation",
+            ),
+        ):
+            response = client.post("/api/reports/build", payload, format="json")
+            assert response.status_code == 200
+            assert response["Content-Type"].startswith("application/vnd.openxmlformats")
+            assert content_type in response["Content-Type"]
+            assert response["Content-Disposition"].lower().endswith(extension + '"')
+            assert b"".join(response.streaming_content)[:2] == b"PK"
+
     def test_single_reports_are_real_office_files(self, weekly_pair):
         from wellness.services.reports import report_center
 
@@ -293,3 +328,39 @@ class TestReportCenter:
         assert filename.endswith(".pptx")
         assert data[:2] == b"PK"
         assert content_type.endswith("presentationml.presentation")
+
+    def test_year_prefers_live_weekly_data_over_stale_monthly_snapshot(
+        self, weekly_pair, monthly_period
+    ):
+        from wellness.services.reports import report_center
+
+        months, sources = report_center.combined_year_dicts(2026)
+
+        july = next(month for month in months if month["start"] == "2026-07-01")
+        assert july["grand"] == sum(
+            report_center.reference_ppt._period_to_dict(period)["grand"]
+            for period in weekly_pair
+        )
+        assert monthly_period not in sources
+        assert sources.count(weekly_pair[0]) == 1
+        assert sources.count(weekly_pair[1]) == 1
+
+    def test_cross_month_week_is_counted_once(self, weekly_pair):
+        from wellness.services.reports import report_center
+
+        weekly_pair[0].period_start = weekly_pair[0].period_start.replace(day=29)
+        weekly_pair[0].period_end = weekly_pair[0].period_end.replace(month=8, day=4)
+        weekly_pair[0].save(update_fields=["period_start", "period_end"])
+
+        july = report_center.weeks_in_month(2026, 7)
+        august = report_center.weeks_in_month(2026, 8)
+        assert weekly_pair[0] in july
+        assert weekly_pair[0] not in august
+
+    def test_same_period_compare_is_rejected(self, weekly_pair):
+        from wellness.services.reports import report_center
+
+        with pytest.raises(ValueError, match="different weekly reports"):
+            report_center.build_compare(
+                "week", "ppt", from_id=weekly_pair[0].id, to_id=weekly_pair[0].id
+            )

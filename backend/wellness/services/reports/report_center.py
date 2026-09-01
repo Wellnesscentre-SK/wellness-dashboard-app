@@ -29,12 +29,21 @@ def _active():
 
 
 def weeks_in_month(year: int, month: int):
-    """Weekly periods that overlap the given calendar month."""
+    """Weekly periods owned by the given calendar month.
+
+    A weekly period is assigned by its start date. Using ownership instead of
+    date overlap is important for a week such as 29 Jul–4 Aug: it must appear
+    in exactly one monthly and yearly aggregate, otherwise the same cases are
+    counted twice.
+    """
     month_start = date(year, month, 1)
     month_end = date(year, month, calendar.monthrange(year, month)[1])
     return sorted(
-        [p for p in _active().filter(report_type=Period.ReportType.WEEKLY)
-         if p.period_start <= month_end and p.period_end >= month_start],
+        [p for p in _active().filter(
+            report_type=Period.ReportType.WEEKLY,
+            period_start__gte=month_start,
+            period_start__lte=month_end,
+        )],
         key=lambda p: p.period_start,
     )
 
@@ -44,7 +53,8 @@ def months_in_year(year: int):
     return list(
         _active().filter(
             report_type=Period.ReportType.MONTHLY,
-            period_start__year=year,
+            period_start__gte=date(year, 1, 1),
+            period_start__lte=date(year, 12, 31),
         ).order_by("period_start")
     )
 
@@ -120,39 +130,28 @@ def combined_month_dict(year: int, month: int) -> tuple[dict, list]:
 
 
 def combined_year_dicts(year: int) -> tuple[list, list]:
-    """Return one dict per month of the year (Jan..Dec order).
-    Prefers stored MONTHLY periods; synthesises pseudo-months by combining
-    that month's weekly reports whenever a monthly period is missing."""
+    """Return one live dict per populated month of the year (Jan..Dec).
+
+    Weekly data is authoritative whenever it exists for a month, matching the
+    monthly module. A stored monthly upload is only a fallback for months that
+    have no weekly entries. This keeps annual exports current after a new
+    weekly upload and, because weeks have one owner month, prevents duplicates.
+    """
     result, sources = [], []
+    stored = {p.period_start.month: p for p in months_in_year(year)}
 
-    def _rank(p):
-        has_data = any(
-            (r.gender_male or 0) + (r.gender_female or 0) + (r.gender_other or 0)
-            for r in p.case_rows.all()
-        ) or any(r.total_cases for r in p.case_rows.all())
-        return (has_data, p.period_start)
-
-    stored: dict[int, Period] = {}
-    for p in sorted(months_in_year(year), key=_rank):
-        stored[p.period_start.month] = p
-    all_weeks = weeklies_by_year()
     for month in range(1, 13):
-        if month in stored:
+        weeks = weeks_in_month(year, month)
+        if weeks:
+            dicts = [reference_ppt._period_to_dict(p) for p in weeks]
+            merged = merge_period_dicts(dicts, f"{calendar.month_abbr[month]} {year}")
+            merged["start"] = f"{year:04d}-{month:02d}-01"
+            merged["end"] = f"{year:04d}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}"
+            result.append(merged)
+            sources.extend(weeks)
+        elif month in stored:
             result.append(reference_ppt._period_to_dict(stored[month]))
             sources.append(stored[month])
-            continue
-        weeks = [p for p in all_weeks
-                 if p.period_start <= date(year, month, calendar.monthrange(year, month)[1])
-                 and p.period_end >= date(year, month, 1)]
-        if not weeks:
-            continue
-        dicts = [reference_ppt._period_to_dict(p) for p in weeks]
-        merged = merge_period_dicts(
-            dicts, f"{calendar.month_abbr[month]} {year}")
-        merged["start"] = f"{year:04d}-{month:02d}-01"
-        merged["end"] = f"{year:04d}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}"
-        result.append(merged)
-        sources.extend(weeks)
     if not result:
         raise ValueError(f"No monthly or weekly data found for {year}.")
     return result, sources
@@ -175,9 +174,7 @@ def options() -> dict:
     for y in years:
         entries = []
         for m in range(1, 13):
-            wk = [p for p in weeks
-                  if p.period_start <= date(y, m, calendar.monthrange(y, m)[1])
-                  and p.period_end >= date(y, m, 1)]
+            wk = weeks_in_month(y, m)
             if not wk and m not in monthlies.get(y, set()):
                 continue
             entries.append({
@@ -280,16 +277,24 @@ def build_compare(compare_type: str, fmt: str,
                   from_year=None, to_year=None):
     """Compare two periods. Returns (filename, bytes, content_type)."""
     if compare_type == "week":
+        if from_id == to_id:
+            raise ValueError("Choose two different weekly reports.")
         a = _active().filter(pk=from_id, report_type=Period.ReportType.WEEKLY).first()
         b = _active().filter(pk=to_id, report_type=Period.ReportType.WEEKLY).first()
         if a is None or b is None:
             raise ValueError("Two existing weekly reports are required.")
+        if b.period_start < a.period_start:
+            a, b = b, a
         data = reference_ppt.build_weekly_comparison(a, b)
         return f"compare_week_{a.period_start}_{b.period_end}.pptx", data, _PPTX_TYPE
 
     if compare_type == "month":
         ya, ma = _parse_ym(from_ym)
         yb, mb = _parse_ym(to_ym)
+        if (ya, ma) == (yb, mb):
+            raise ValueError("Choose two different months.")
+        if (yb, mb) < (ya, ma):
+            ya, ma, yb, mb = yb, mb, ya, ma
         da, _ = combined_month_dict(ya, ma)
         db, _ = combined_month_dict(yb, mb)
         data = reference_ppt.build_monthly_comparison(da, db)
@@ -298,6 +303,14 @@ def build_compare(compare_type: str, fmt: str,
     if compare_type == "year":
         if not from_year or not to_year:
             raise ValueError("Two years are required.")
+        try:
+            from_year, to_year = int(from_year), int(to_year)
+        except (TypeError, ValueError):
+            raise ValueError("Years must be calendar years.")
+        if from_year == to_year:
+            raise ValueError("Choose two different years.")
+        if to_year < from_year:
+            from_year, to_year = to_year, from_year
         da, _ = combined_year_dicts(int(from_year))
         db, _ = combined_year_dicts(int(to_year))
         lbl_a = str(from_year) if from_year != to_year else f"{from_year} (Baseline)"
@@ -311,6 +324,9 @@ def build_compare(compare_type: str, fmt: str,
 def _parse_ym(value):
     try:
         y, m = str(value).split("-")
-        return int(y), int(m)
+        y, m = int(y), int(m)
+        if not 1 <= m <= 12:
+            raise ValueError
+        return y, m
     except (ValueError, AttributeError, TypeError):
         raise ValueError("Month must be in 'YYYY-MM' format.")

@@ -1,6 +1,11 @@
 import axios from 'axios'
 
-const apiBaseUrl = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
+// Vercel may provide either the API root or the Render origin. Normalize both
+// forms so every request reaches Django's /api/ routes in production.
+const configuredApiUrl = (import.meta.env.VITE_API_URL || '/api').replace(/\/+$/, '')
+const apiBaseUrl = configuredApiUrl === '/api' || configuredApiUrl.endsWith('/api')
+  ? configuredApiUrl
+  : `${configuredApiUrl}/api`
 
 const client = axios.create({ baseURL: apiBaseUrl })
 

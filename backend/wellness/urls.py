@@ -1,5 +1,6 @@
 """URL routing for the wellness API."""
 
+from django.http import JsonResponse
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 
@@ -7,7 +8,12 @@ from wellness import views
 from wellness.serializers import UserSerializer
 from wellness.views import MeView
 
+
+def api_health(request):
+    return JsonResponse({"status": "ok", "service": "wellness-backend"})
+
 urlpatterns = [
+    path("health", api_health, name="api-health"),
     path("auth/login", views.TokenObtainPairView.as_view(), name="login"),
     path("auth/refresh", TokenRefreshView.as_view(), name="refresh"),
     path("auth/me", MeView.as_view(), name="me"),

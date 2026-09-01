@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import client, { apiError } from '../api/client'
 import { Card, ErrorBox, Spinner, StatusBadge } from '../components/ui'
 import CompareAnalysis from '../components/CompareAnalysis'
@@ -139,8 +140,10 @@ function emptySheetState() {
 }
 
 export default function ManualEntry() {
+  const [searchParams] = useSearchParams()
+  const urlPeriodId = searchParams.get('period')
   const [periods, setPeriods] = useState([])
-  const [selectedPeriodId, setSelectedPeriodId] = useState('')
+  const [selectedPeriodId, setSelectedPeriodId] = useState(() => (urlPeriodId ? String(urlPeriodId) : ''))
   const [activeTab, setActiveTab] = useState('worksheet') // 'worksheet' | 'verification' | 'audit'
   const [sheetData, setSheetData] = useState(() => emptySheetState())
   const [resetNonce, setResetNonce] = useState(0)
@@ -181,8 +184,11 @@ export default function ManualEntry() {
   const inputRefs = useRef({})
   const activeInputKey = useRef(null)
 
-  // Load periods list
-  const loadPeriods = () => {
+  // Load periods list. `preferredId` (when provided) is used as the selection
+  // fallback so that after an import we land on that period even if the list
+  // response races with the import response.
+  const loadPeriods = (preferredId = null) => {
+    const requested = preferredId || (urlPeriodId && String(urlPeriodId))
     client
       .get('/periods')
       .then(({ data }) => {
@@ -192,6 +198,11 @@ export default function ManualEntry() {
           return
         }
         setSelectedPeriodId((cur) => {
+          const pref = requested ? String(requested) : null
+          if (pref) {
+            if (data.some((p) => String(p.id) === pref)) return pref
+            return pref
+          }
           if (data.some((p) => String(p.id) === cur)) return cur
           return String(data[0].id)
         })
@@ -199,7 +210,7 @@ export default function ManualEntry() {
       .catch((e) => setError(apiError(e)))
   }
 
-  useEffect(loadPeriods, [])
+  useEffect(() => loadPeriods(), [])
 
   // Load worksheet data for selected period (worksheetNonce forces a reload,
   // e.g. after an import replaces the currently-selected period)
@@ -496,20 +507,22 @@ export default function ManualEntry() {
     setPeriodSaving(true)
     setError('')
     setSuccessMsg('')
+    let newPeriodId = null
     try {
       if (editingPeriodId) {
         await client.patch(`/periods/${editingPeriodId}`, periodForm)
         setSuccessMsg('Period updated successfully!')
       } else {
         const { data } = await client.post('/periods', periodForm)
-        setSelectedPeriodId(String(data.id))
+        newPeriodId = String(data.id)
+        setSelectedPeriodId(newPeriodId)
         setRangeStart(data.period_start)
         setRangeEnd(data.period_end)
         setCalendarMatched(data)
         setSuccessMsg('New period created! Enter its numbers below or import a file for it.')
       }
       resetPeriodForm()
-      await loadPeriods()
+      await loadPeriods(newPeriodId)
     } catch (err) {
       setError(apiError(err))
     } finally {
@@ -607,7 +620,7 @@ export default function ManualEntry() {
       .then(({ data }) => {
         setImportPreview(null)
         setImportReplaceConfirm(false)
-        loadPeriods()
+        loadPeriods(String(data.period_id))
         setSelectedPeriodId(String(data.period_id))
         setWorksheetNonce((n) => n + 1)
         setSuccessMsg(
@@ -647,19 +660,46 @@ export default function ManualEntry() {
   const executeGeneratePPT = async () => {
     setPptWarningModal(null)
     setLoading(true)
+    setError('')
     try {
       const response = await client.post(
         '/reports/generate',
         { period_id: selectedPeriodId, format: 'ppt' },
         { responseType: 'blob' },
       )
-      const blob = new Blob([response.data], {
+      const arrayBuf = response.data instanceof Blob
+        ? await response.data.arrayBuffer()
+        : response.data instanceof ArrayBuffer
+          ? response.data
+          : await new Blob([response.data]).arrayBuffer()
+      const header = new Uint8Array(arrayBuf, 0, 2)
+      const isPK = header[0] === 0x50 && header[1] === 0x4B
+
+      if (!isPK) {
+        try {
+          const text = new TextDecoder().decode(arrayBuf)
+          const err = JSON.parse(text)
+          setError(err.message || err.detail || 'PPT generation failed.')
+        } catch {
+          setError('PPT generation failed.')
+        }
+        return
+      }
+
+      let filename = `Wellness_Report_Period_${selectedPeriodId}.pptx`
+      try {
+        const cd = response.headers['content-disposition'] || ''
+        const match = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+        if (match && match[1]) filename = match[1].replace(/["']/g, '').trim()
+      } catch { /* ignored */ }
+
+      const blob = new Blob([arrayBuf], {
         type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `Wellness_Report_Period_${selectedPeriodId}.pptx`
+      a.download = filename
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -675,20 +715,47 @@ export default function ManualEntry() {
   const handleGenerateAnnualPPT = async () => {
     if (!selectedPeriodId) return
     setLoading(true)
+    setError('')
     try {
       const response = await client.post(
         '/reports/generate',
         { period_id: selectedPeriodId, format: 'annual_ppt' },
         { responseType: 'blob' },
       )
-      const blob = new Blob([response.data], {
+      const arrayBuf = response.data instanceof Blob
+        ? await response.data.arrayBuffer()
+        : response.data instanceof ArrayBuffer
+          ? response.data
+          : await new Blob([response.data]).arrayBuffer()
+      const header = new Uint8Array(arrayBuf, 0, 2)
+      const isPK = header[0] === 0x50 && header[1] === 0x4B
+
+      if (!isPK) {
+        try {
+          const text = new TextDecoder().decode(arrayBuf)
+          const err = JSON.parse(text)
+          setError(err.message || err.detail || 'Annual PPT generation failed.')
+        } catch {
+          setError('Annual PPT generation failed.')
+        }
+        return
+      }
+
+      const year = selectedPeriod ? selectedPeriod.period_start.slice(0, 4) : ''
+      let filename = `Annual_${year}_Data_Analysis.pptx`
+      try {
+        const cd = response.headers['content-disposition'] || ''
+        const match = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+        if (match && match[1]) filename = match[1].replace(/["']/g, '').trim()
+      } catch { /* ignored */ }
+
+      const blob = new Blob([arrayBuf], {
         type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       })
-      const year = selectedPeriod ? selectedPeriod.period_start.slice(0, 4) : ''
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `Annual_${year}_Data_Analysis.pptx`
+      a.download = filename
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -703,25 +770,54 @@ export default function ManualEntry() {
   // Handle Export Excel action
   const handleExportExcel = async () => {
     setLoading(true)
+    setError('')
     try {
       const response = await client.post(
         '/reports/generate',
         { period_id: selectedPeriodId, format: 'xlsx' },
         { responseType: 'blob' },
       )
-      const blob = new Blob([response.data], {
+      const arrayBuf = response.data instanceof Blob
+        ? await response.data.arrayBuffer()
+        : response.data instanceof ArrayBuffer
+          ? response.data
+          : await new Blob([response.data]).arrayBuffer()
+      const header = new Uint8Array(arrayBuf, 0, 2)
+      const isPK = header[0] === 0x50 && header[1] === 0x4B
+
+      if (!isPK) {
+        try {
+          const text = new TextDecoder().decode(arrayBuf)
+          const err = JSON.parse(text)
+          setError(err.message || err.detail || 'Excel export failed.')
+        } catch {
+          setError('Excel export failed.')
+        }
+        return
+      }
+
+      let filename = `Wellness_Worksheet_Period_${selectedPeriodId}.xlsx`
+      try {
+        const cd = response.headers['content-disposition'] || ''
+        const match = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+        if (match && match[1]) filename = match[1].replace(/["']/g, '').trim()
+      } catch { /* ignored */ }
+
+      const blob = new Blob([arrayBuf], {
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `Wellness_Worksheet_Period_${selectedPeriodId}.xlsx`
+      a.download = filename
       document.body.appendChild(a)
       a.click()
       a.remove()
       window.URL.revokeObjectURL(url)
     } catch (err) {
       setError(apiError(err))
+    } finally {
+      setLoading(false)
     }
   }
 

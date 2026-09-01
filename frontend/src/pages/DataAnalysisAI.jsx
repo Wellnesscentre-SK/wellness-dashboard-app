@@ -373,12 +373,50 @@ You can also upload files for me to analyze, or use the quick action buttons bel
 
   const handleApprove = async (action) => {
     try {
-      const { data, headers } = await client.put('/assistant/chat', { action }, { responseType: 'blob' })
-      const blob = new Blob([data])
+      const response = await client.put('/assistant/chat', { action }, { responseType: 'blob' })
+      const arrayBuf = response.data instanceof Blob
+        ? await response.data.arrayBuffer()
+        : response.data instanceof ArrayBuffer
+          ? response.data
+          : await new Blob([response.data]).arrayBuffer()
+      const header = new Uint8Array(arrayBuf, 0, 2)
+      const isPK = header[0] === 0x50 && header[1] === 0x4B
+
+      if (!isPK) {
+        try {
+          const text = new TextDecoder().decode(arrayBuf)
+          const err = JSON.parse(text)
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `Report generation failed: ${err.message || err.detail || 'Invalid response'}`,
+          }])
+        } catch {
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: 'Report generation failed.',
+          }])
+        }
+        return
+      }
+
+      let filename = 'report.pptx'
+      try {
+        const cd = response.headers?.['content-disposition'] || ''
+        const match = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+        if (match && match[1]) filename = match[1].replace(/["']/g, '').trim()
+      } catch { /* ignored */ }
+
+      if (!/\.(pptx|xlsx|ppt|xls)$/i.test(filename)) {
+        filename += '.pptx'
+      }
+
+      const blob = new Blob([arrayBuf], {
+        type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = headers['content-disposition']?.match(/filename="?([^";]+)"?/)?.[1] || 'report.pptx'
+      a.download = filename
       document.body.appendChild(a)
       a.click()
       a.remove()

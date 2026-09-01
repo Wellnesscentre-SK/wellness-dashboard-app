@@ -73,16 +73,49 @@ export default function ReportsCenter() {
     (m) => `${year}-${String(m.month).padStart(2, '0')}` === monthKey,
   )
 
-  // A year change replaces every option list. Clear selections that belong to
-  // the previous year so Compare can never submit stale period IDs.
+  // Auto-populate selections when data or year changes
   useEffect(() => {
-    setWeekId('')
-    setMonthKey('')
-    setCmpWeekA('')
-    setCmpWeekB('')
-    setCmpMonthA('')
-    setCmpMonthB('')
-  }, [year])
+    if (weeksForYear.length > 0) {
+      setWeekId((prev) => (weeksForYear.some((w) => String(w.id) === prev) ? prev : String(weeksForYear[0].id)))
+      setCmpWeekA((prev) => (weeksForYear.some((w) => String(w.id) === prev) ? prev : String(weeksForYear[0].id)))
+      setCmpWeekB((prev) => (weeksForYear.some((w) => String(w.id) === prev) ? prev : String((weeksForYear[1] || weeksForYear[0]).id)))
+    } else {
+      setWeekId('')
+      setCmpWeekA('')
+      setCmpWeekB('')
+    }
+  }, [weeksForYear])
+
+  useEffect(() => {
+    if (monthsForYear.length > 0) {
+      const firstKey = `${year}-${String(monthsForYear[0].month).padStart(2, '0')}`
+      setMonthKey((prev) => (monthsForYear.some((m) => `${year}-${String(m.month).padStart(2, '0')}` === prev) ? prev : firstKey))
+    } else {
+      setMonthKey('')
+    }
+  }, [monthsForYear, year])
+
+  useEffect(() => {
+    if (allMonthKeys.length > 0) {
+      setCmpMonthA((prev) => (allMonthKeys.some((k) => k.value === prev) ? prev : allMonthKeys[0].value))
+      setCmpMonthB((prev) => (allMonthKeys.some((k) => k.value === prev) ? prev : (allMonthKeys[1] || allMonthKeys[0]).value))
+    } else {
+      setCmpMonthA('')
+      setCmpMonthB('')
+    }
+  }, [allMonthKeys])
+
+  useEffect(() => {
+    if (years.length > 0) {
+      setYearSel((prev) => (years.map(String).includes(prev) ? prev : String(years[0])))
+      setCmpYearA((prev) => (years.map(String).includes(prev) ? prev : String(years[0])))
+      setCmpYearB((prev) => (years.map(String).includes(prev) ? prev : String(years[1] || years[0])))
+    } else {
+      setYearSel('')
+      setCmpYearA('')
+      setCmpYearB('')
+    }
+  }, [years])
 
   const download = async (payload, busyKey) => {
     setBusy(busyKey)
@@ -243,7 +276,7 @@ export default function ReportsCenter() {
                 {weeksForYear.map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
               </select>
             </div>
-            <button className={`${btnCompare} mt-4`} disabled={!cmpWeekA || !cmpWeekB || cmpWeekA === cmpWeekB || !!busy}
+            <button className={`${btnCompare} mt-4`} disabled={!cmpWeekA || !cmpWeekB || !!busy}
               onClick={() => download({ compare: { type: 'week', from_id: Number(cmpWeekA), to_id: Number(cmpWeekB) } }, 'wk-cmp')}>
               {busy === 'wk-cmp' ? 'Comparing…' : '⚖️ Compare PPT'}
             </button>
@@ -300,7 +333,7 @@ export default function ReportsCenter() {
                 {allMonthKeys.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
               </select>
             </div>
-            <button className={`${btnCompare} mt-4`} disabled={!cmpMonthA || !cmpMonthB || cmpMonthA === cmpMonthB || !!busy}
+            <button className={`${btnCompare} mt-4`} disabled={!cmpMonthA || !cmpMonthB || !!busy}
               onClick={() => download({ compare: { type: 'month', from_month: cmpMonthA, to_month: cmpMonthB } }, 'mo-cmp')}>
               {busy === 'mo-cmp' ? 'Comparing…' : '⚖️ Compare PPT'}
             </button>
@@ -348,7 +381,7 @@ export default function ReportsCenter() {
                 {years.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
-            <button className={`${btnCompare} mt-4`} disabled={!cmpYearA || !cmpYearB || cmpYearA === cmpYearB || !!busy}
+            <button className={`${btnCompare} mt-4`} disabled={!cmpYearA || !cmpYearB || !!busy}
               onClick={() => download({ compare: { type: 'year', from_year: Number(cmpYearA), to_year: Number(cmpYearB) } }, 'yr-cmp')}>
               {busy === 'yr-cmp' ? 'Comparing…' : '⚖️ Compare PPT'}
             </button>

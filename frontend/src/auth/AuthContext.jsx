@@ -7,19 +7,14 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const token = localStorage.getItem('access')
-    if (token) {
-      client.get('/auth/me')
-        .then(({ data }) => setUser(data))
-        .catch(() => {
-          localStorage.removeItem('access')
-          localStorage.removeItem('refresh')
-          setUser(null)
-        })
-        .finally(() => setLoading(false))
-    } else {
-      setLoading(false)
-    }
+    client.get('/auth/me')
+      .then(({ data }) => setUser(data))
+      .catch(() => {
+        localStorage.removeItem('access')
+        localStorage.removeItem('refresh')
+        setUser(null)
+      })
+      .finally(() => setLoading(false))
   }, [])
 
   const login = useCallback(async (username, password) => {

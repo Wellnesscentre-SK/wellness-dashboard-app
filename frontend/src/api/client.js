@@ -69,15 +69,48 @@ export function apiError(error) {
 }
 
 export async function generateReport(periodId, format, previousPeriodId) {
-  const { data, headers } = await client.post(
+  const response = await client.post(
     `/reports/generate`,
     { period_id: periodId, format, ...(previousPeriodId && { previous_period_id: previousPeriodId }) },
     { responseType: 'blob' },
   )
-  const disposition = headers['content-disposition'] || ''
-  const match = disposition.match(/filename="?([^";]+)"?/)
-  const filename = match ? match[1] : `report.${format === 'ppt' ? 'pptx' : format}`
-  const url = URL.createObjectURL(new Blob([data]))
+  const arrayBuf = response.data instanceof Blob
+    ? await response.data.arrayBuffer()
+    : response.data instanceof ArrayBuffer
+      ? response.data
+      : await new Blob([response.data]).arrayBuffer()
+  const header = new Uint8Array(arrayBuf, 0, 2)
+  const isPK = header[0] === 0x50 && header[1] === 0x4B
+
+  if (!isPK) {
+    try {
+      const text = new TextDecoder().decode(arrayBuf)
+      const err = JSON.parse(text)
+      throw new Error(err.message || err.detail || 'Report generation failed.')
+    } catch (e) {
+      if (e instanceof Error) throw e
+      throw new Error('Report generation failed.')
+    }
+  }
+
+  const isExcel = String(format).toLowerCase() === 'xlsx'
+  const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+  const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  const mimeType = isExcel ? XLSX_MIME : PPTX_MIME
+  const ext = isExcel ? '.xlsx' : '.pptx'
+
+  let filename = `report_${periodId}${ext}`
+  try {
+    const disposition = response.headers?.['content-disposition'] || ''
+    const match = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+    if (match && match[1]) filename = match[1].replace(/["']/g, '').trim()
+  } catch { /* header unreadable in some proxy environments */ }
+
+  if (!/\.(pptx|xlsx|ppt|xls)$/i.test(filename)) {
+    filename += ext
+  }
+
+  const url = URL.createObjectURL(new Blob([arrayBuf], { type: mimeType }))
   const a = document.createElement('a')
   a.href = url
   a.download = filename

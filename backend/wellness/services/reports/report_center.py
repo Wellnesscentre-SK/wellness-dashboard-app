@@ -296,11 +296,13 @@ def build_compare(compare_type: str, fmt: str,
         return f"compare_month_{ya}_{ma:02d}_vs_{yb}_{mb:02d}.pptx", data, _PPTX_TYPE
 
     if compare_type == "year":
-        if not from_year or not to_year or from_year == to_year:
-            raise ValueError("Two different years are required.")
+        if not from_year or not to_year:
+            raise ValueError("Two years are required.")
         da, _ = combined_year_dicts(int(from_year))
         db, _ = combined_year_dicts(int(to_year))
-        data = reference_ppt.build_yearly(da, db, str(from_year), str(to_year))
+        lbl_a = str(from_year) if from_year != to_year else f"{from_year} (Baseline)"
+        lbl_b = str(to_year) if from_year != to_year else f"{to_year} (Current)"
+        data = reference_ppt.build_yearly(da, db, lbl_a, lbl_b)
         return f"compare_year_{from_year}_vs_{to_year}.pptx", data, _PPTX_TYPE
 
     raise ValueError("compare type must be 'week', 'month' or 'year'.")

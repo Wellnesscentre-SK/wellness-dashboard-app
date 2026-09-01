@@ -170,7 +170,11 @@ class PeriodListView(APIView):
     permission_classes = (IsAdmin,)
 
     def get(self, request):
-        qs = Period.objects.filter(superseded_by__isnull=True).select_related("created_by")
+        qs = (
+            Period.objects.filter(superseded_by__isnull=True)
+            .select_related("created_by")
+            .order_by("-period_start", "-id")
+        )
         report_type = request.query_params.get("report_type")
         if report_type:
             qs = qs.filter(report_type=report_type)

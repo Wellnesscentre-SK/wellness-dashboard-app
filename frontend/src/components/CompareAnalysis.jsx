@@ -83,7 +83,7 @@ export default function CompareAnalysis() {
       return
     }
     const latest = typePeriods[typePeriods.length - 1]
-    let prev = typePeriods[typePeriods.length - 2] || null
+    let prev = typePeriods[typePeriods.length - 2] || latest
     if (type === 'year' && prev) {
       const y = latest.period_start.slice(0, 4)
       const mmdd = latest.period_start.slice(5)
@@ -95,9 +95,9 @@ export default function CompareAnalysis() {
         ? sameMonth[sameMonth.length - 1]
         : diffYear.length
           ? diffYear[diffYear.length - 1]
-          : null
+          : latest
     }
-    setFromId(prev ? String(prev.id) : '')
+    setFromId(prev ? String(prev.id) : String(latest.id))
     setToId(String(latest.id))
     setResult(null)
   }, [type, typePeriods])
@@ -115,11 +115,6 @@ export default function CompareAnalysis() {
   const handleCompare = async () => {
     if (!fromId || !toId) {
       setError('Select two periods to compare.')
-      return
-    }
-    const fromP = typePeriods.find((p) => String(p.id) === fromId)
-    if (type === 'year' && fromP && toPeriod && fromP.period_start.slice(0, 4) === toPeriod.period_start.slice(0, 4)) {
-      setError('Year-over-year needs two periods from different years — no prior-year data is available for this period.')
       return
     }
     setLoading(true)
@@ -158,12 +153,43 @@ export default function CompareAnalysis() {
         { format, compare_type: type, from_id: Number(fromId), to_id: Number(toId) },
         { responseType: 'blob' },
       )
-      const ext = format === 'comparison_ppt' ? 'pptx' : 'xlsx'
-      const blob = new Blob([response.data])
+      const arrayBuf = response.data instanceof Blob
+        ? await response.data.arrayBuffer()
+        : response.data instanceof ArrayBuffer
+          ? response.data
+          : await new Blob([response.data]).arrayBuffer()
+      const header = new Uint8Array(arrayBuf, 0, 2)
+      const isPK = header[0] === 0x50 && header[1] === 0x4B
+
+      if (!isPK) {
+        try {
+          const text = new TextDecoder().decode(arrayBuf)
+          const err = JSON.parse(text)
+          setError(err.message || err.detail || 'Export failed.')
+        } catch {
+          setError('Export failed.')
+        }
+        return
+      }
+
+      const isExcel = format === 'comparison_xlsx'
+      const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+      const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      const mimeType = isExcel ? XLSX_MIME : PPTX_MIME
+      const ext = isExcel ? '.xlsx' : '.pptx'
+
+      let filename = `ai_analysis_${type}_${fromId}_${toId}${ext}`
+      try {
+        const cd = response.headers['content-disposition'] || ''
+        const match = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+        if (match && match[1]) filename = match[1].replace(/["']/g, '').trim()
+      } catch { /* ignored */ }
+
+      const blob = new Blob([arrayBuf], { type: mimeType })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `ai_analysis_${type}_${fromId}_${toId}.${ext}`
+      a.download = filename
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -268,7 +294,7 @@ export default function CompareAnalysis() {
 
           <button
             onClick={() => download('comparison_ppt')}
-            disabled={downloading || !result}
+            disabled={Boolean(downloading) || !fromId || !toId}
             className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-40 transition-all shadow-md flex items-center gap-2"
           >
             {downloading === 'comparison_ppt' ? 'Generating…' : '📊 Export Comparison PPT'}
@@ -276,7 +302,7 @@ export default function CompareAnalysis() {
 
           <button
             onClick={() => download('comparison_xlsx')}
-            disabled={downloading || !result}
+            disabled={Boolean(downloading) || !fromId || !toId}
             className="rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-40 transition-all flex items-center gap-2"
           >
             {downloading === 'comparison_xlsx' ? 'Generating…' : '📥 Export Comparison Excel'}

@@ -10,7 +10,7 @@ from django.db import transaction
 
 from wellness.models import User
 from wellness.services import parsing as P
-from wellness.services.persistence import save_import
+from wellness.services.persistence import active_period_for, save_import
 
 FIXTURES = Path(__file__).resolve().parent.parent.parent.parent / "fixtures"
 
@@ -50,6 +50,9 @@ class Command(BaseCommand):
                 with open(path, "rb") as fh:
                     data = fh.read()
                 report = P.parse_excel(data)
+                if active_period_for(report.report_type, report.period_start, report.period_end):
+                    self.stdout.write(f"Skipping existing period for {name}.")
+                    continue
                 try:
                     imp = save_import(report, admin, filename=name, raw_bytes=data)
                     self.stdout.write(

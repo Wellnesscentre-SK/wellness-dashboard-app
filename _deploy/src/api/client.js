@@ -7,7 +7,9 @@ const apiBaseUrl = configuredApiUrl === '/api' || configuredApiUrl.endsWith('/ap
   ? configuredApiUrl
   : `${configuredApiUrl}/api`
 
-const client = axios.create({ baseURL: apiBaseUrl })
+// Render free instances can take a moment to wake up, but a request must
+// still fail visibly instead of leaving every page in an infinite spinner.
+const client = axios.create({ baseURL: apiBaseUrl, timeout: 20000 })
 
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem('access')

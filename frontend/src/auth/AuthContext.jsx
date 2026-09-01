@@ -7,6 +7,14 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // An unauthenticated visitor does not need a round trip just to discover
+    // that there is no session. This also prevents a sleeping backend from
+    // holding the whole app on its initial loading screen.
+    if (!localStorage.getItem('access')) {
+      setLoading(false)
+      return
+    }
+
     client.get('/auth/me')
       .then(({ data }) => setUser(data))
       .catch(() => {

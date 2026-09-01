@@ -90,10 +90,8 @@ export default function ReportsCenter() {
     try {
       const response = await client.post('/reports/build', payload, { responseType: 'blob' })
 
-      // ── Sniff the response bytes ──────────────────────────────────────────
-      // PPTX and XLSX are ZIP archives: first 2 bytes are always 'PK' (0x50 0x4B).
-      // If the bytes are NOT 'PK', the server returned a JSON error body instead of
-      // a file (this is the CORS production bug: content-type header is unreadable).
+      // PPTX and XLSX are ZIP archives. Validate the signature so a JSON error
+      // response can never be downloaded as an extensionless TXT file.
       const arrayBuf = response.data instanceof Blob
         ? await response.data.arrayBuffer()
         : response.data instanceof ArrayBuffer
@@ -103,7 +101,6 @@ export default function ReportsCenter() {
       const isPK = header[0] === 0x50 && header[1] === 0x4B
 
       if (!isPK) {
-        // Not a ZIP — must be a JSON/text error from the server
         try {
           const text = new TextDecoder().decode(arrayBuf)
           const err = JSON.parse(text)
@@ -114,29 +111,24 @@ export default function ReportsCenter() {
         return
       }
 
-      // ── Determine filename + MIME type from the payload (no headers needed) ─
       const isCompare = !!payload.compare
       const fmt = isCompare ? 'ppt' : String(payload.format || 'ppt').toLowerCase()
       const isExcel = fmt === 'xlsx'
-
       const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
       const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       const mimeType = isExcel ? XLSX_MIME : PPTX_MIME
       const ext = isExcel ? '.xlsx' : '.pptx'
 
-      // Try to read filename from Content-Disposition (works locally / if CORS exposes it).
-      // Fall back to a clean generated name derived from the payload.
       let filename = ''
       try {
         const cd = response.headers['content-disposition'] || ''
-        const m = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
-        if (m && m[1]) filename = m[1].replace(/['"]/g, '').trim()
+        const match = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/)
+        if (match && match[1]) filename = match[1].replace(/["']/g, '').trim()
       } catch { /* header not readable in production */ }
 
       if (!filename || !/\.(pptx|xlsx|ppt|xls)$/i.test(filename)) {
         if (isCompare) {
-          const ctype = payload.compare?.type || 'period'
-          filename = `compare_${ctype}${ext}`
+          filename = `compare_${payload.compare?.type || 'period'}${ext}`
         } else {
           const rtype = payload.report_type || 'report'
           const yr = payload.year || ''
@@ -145,9 +137,7 @@ export default function ReportsCenter() {
         }
       }
 
-      // ── Trigger the download ────────────────────────────────────────────────
-      const blob = new Blob([arrayBuf], { type: mimeType })
-      const url = URL.createObjectURL(blob)
+      const url = URL.createObjectURL(new Blob([arrayBuf], { type: mimeType }))
       const a = document.createElement('a')
       a.href = url
       a.download = filename
@@ -173,7 +163,6 @@ export default function ReportsCenter() {
     }
     return apiError(e)
   }
-
 
   if (loading) return <Spinner label="Loading report modules…" />
 

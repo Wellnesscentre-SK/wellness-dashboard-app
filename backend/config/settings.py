@@ -107,8 +107,13 @@ CORS_ALLOW_ALL_ORIGINS = True  # dev convenience; restrict before deploy
 
 _frontend_url = os.environ.get("FRONTEND_URL")
 if _frontend_url:
-    CORS_ALLOWED_ORIGINS = [_frontend_url]
-    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = [
+        o.strip() for o in _frontend_url.split(",") if o.strip()
+    ]
+    if not CORS_ALLOWED_ORIGINS:
+        CORS_ALLOW_ALL_ORIGINS = True
+    else:
+        CORS_ALLOW_ALL_ORIGINS = False
 
 # Expose file-download headers to the browser so the Report Center can read the
 # real filename / content-type. Without this, Content-Disposition (and a

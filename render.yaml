@@ -7,6 +7,8 @@ services:
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: config.settings
+      - key: FRONTEND_URL
+        value: https://wellness-frontend-wine.vercel.app
       - key: SECRET_KEY
         generateValue: true
       - key: DATABASE_URL

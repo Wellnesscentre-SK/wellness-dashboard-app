@@ -111,10 +111,20 @@ export default function CompareAnalysis() {
         )
       : typePeriods
   const noYoYBaseline = type === 'year' && toPeriod && baselineOptions.length === 0
+  const canCompare = Boolean(
+    fromId &&
+    toId &&
+    fromId !== toId &&
+    !noYoYBaseline,
+  )
 
   const handleCompare = async () => {
-    if (!fromId || !toId) {
-      setError('Select two periods to compare.')
+    if (!canCompare) {
+      setError(
+        noYoYBaseline
+          ? 'A previous-year period is required for year-over-year comparison.'
+          : 'Select two different periods to compare.',
+      )
       return
     }
     setLoading(true)
@@ -283,10 +293,16 @@ export default function CompareAnalysis() {
           </p>
         )}
 
+        {type !== 'year' && typePeriods.length < 2 && (
+          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
+            Add one more {type === 'week' ? 'weekly' : 'monthly'} report to enable comparison.
+          </p>
+        )}
+
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <button
             onClick={handleCompare}
-            disabled={loading || !fromId || !toId}
+            disabled={loading || !canCompare}
             className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-40 transition-all shadow-md flex items-center gap-2"
           >
             {loading ? <Spinner label="" /> : '⚡'} Compare Periods
@@ -294,7 +310,7 @@ export default function CompareAnalysis() {
 
           <button
             onClick={() => download('comparison_ppt')}
-            disabled={Boolean(downloading) || !fromId || !toId}
+            disabled={Boolean(downloading) || !canCompare}
             className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-40 transition-all shadow-md flex items-center gap-2"
           >
             {downloading === 'comparison_ppt' ? 'Generating…' : '📊 Export Comparison PPT'}
@@ -302,7 +318,7 @@ export default function CompareAnalysis() {
 
           <button
             onClick={() => download('comparison_xlsx')}
-            disabled={Boolean(downloading) || !fromId || !toId}
+            disabled={Boolean(downloading) || !canCompare}
             className="rounded-xl border border-slate-600 bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-40 transition-all flex items-center gap-2"
           >
             {downloading === 'comparison_xlsx' ? 'Generating…' : '📥 Export Comparison Excel'}

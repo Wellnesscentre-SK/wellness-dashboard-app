@@ -78,7 +78,7 @@ export default function ReportsCenter() {
     if (weeksForYear.length > 0) {
       setWeekId((prev) => (weeksForYear.some((w) => String(w.id) === prev) ? prev : String(weeksForYear[0].id)))
       setCmpWeekA((prev) => (weeksForYear.some((w) => String(w.id) === prev) ? prev : String(weeksForYear[0].id)))
-      setCmpWeekB((prev) => (weeksForYear.some((w) => String(w.id) === prev) ? prev : String((weeksForYear[1] || weeksForYear[0]).id)))
+      setCmpWeekB((prev) => (weeksForYear.length > 1 && weeksForYear.some((w) => String(w.id) === prev) ? prev : weeksForYear[1] ? String(weeksForYear[1].id) : ''))
     } else {
       setWeekId('')
       setCmpWeekA('')
@@ -98,7 +98,7 @@ export default function ReportsCenter() {
   useEffect(() => {
     if (allMonthKeys.length > 0) {
       setCmpMonthA((prev) => (allMonthKeys.some((k) => k.value === prev) ? prev : allMonthKeys[0].value))
-      setCmpMonthB((prev) => (allMonthKeys.some((k) => k.value === prev) ? prev : (allMonthKeys[1] || allMonthKeys[0]).value))
+      setCmpMonthB((prev) => (allMonthKeys.length > 1 && allMonthKeys.some((k) => k.value === prev) ? prev : allMonthKeys[1] ? allMonthKeys[1].value : ''))
     } else {
       setCmpMonthA('')
       setCmpMonthB('')
@@ -109,7 +109,7 @@ export default function ReportsCenter() {
     if (years.length > 0) {
       setYearSel((prev) => (years.map(String).includes(prev) ? prev : String(years[0])))
       setCmpYearA((prev) => (years.map(String).includes(prev) ? prev : String(years[0])))
-      setCmpYearB((prev) => (years.map(String).includes(prev) ? prev : String(years[1] || years[0])))
+      setCmpYearB((prev) => (years.length > 1 && years.map(String).includes(prev) ? prev : years[1] ? String(years[1]) : ''))
     } else {
       setYearSel('')
       setCmpYearA('')
@@ -266,6 +266,7 @@ export default function ReportsCenter() {
           </Card>
 
           <Card title="Week-to-Week Comparison" subtitle="Pick any two weekly entries to compare.">
+            {weeksForYear.length < 2 && <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">Import a second weekly report to enable comparison.</p>}
             <div className="grid grid-cols-2 gap-3">
               <select className={selectCls} value={cmpWeekA} onChange={(e) => setCmpWeekA(e.target.value)}>
                 <option value="">From week…</option>
@@ -323,6 +324,7 @@ export default function ReportsCenter() {
           </Card>
 
           <Card title="Month-to-Month Comparison" subtitle="Compares the combined totals of any two months.">
+            {allMonthKeys.length < 2 && <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">Add report data for a second month to enable comparison.</p>}
             <div className="grid grid-cols-2 gap-3">
               <select className={selectCls} value={cmpMonthA} onChange={(e) => setCmpMonthA(e.target.value)}>
                 <option value="">From month…</option>
@@ -371,6 +373,7 @@ export default function ReportsCenter() {
           </Card>
 
           <Card title="Year-to-Year Comparison" subtitle="Full-year vs full-year combined analysis.">
+            {years.length < 2 && <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">Add report data for a second year to enable comparison.</p>}
             <div className="grid grid-cols-2 gap-3">
               <select className={selectCls} value={cmpYearA} onChange={(e) => setCmpYearA(e.target.value)}>
                 <option value="">From year…</option>

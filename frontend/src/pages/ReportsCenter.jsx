@@ -277,8 +277,14 @@ export default function ReportsCenter() {
                 {weeksForYear.map((w) => <option key={w.id} value={w.id}>{w.label}</option>)}
               </select>
             </div>
-            <button className={`${btnCompare} mt-4`} disabled={!cmpWeekA || !cmpWeekB || cmpWeekA === cmpWeekB || !!busy}
-              onClick={() => download({ compare: { type: 'week', from_id: Number(cmpWeekA), to_id: Number(cmpWeekB) } }, 'wk-cmp')}>
+            <button className={`${btnCompare} mt-4`} disabled={!!busy}
+              onClick={() => {
+                if (!cmpWeekA || !cmpWeekB || cmpWeekA === cmpWeekB) {
+                  setError('Import and select two different weekly reports before comparing.')
+                  return
+                }
+                download({ compare: { type: 'week', from_id: Number(cmpWeekA), to_id: Number(cmpWeekB) } }, 'wk-cmp')
+              }}>
               {busy === 'wk-cmp' ? 'Comparing…' : '⚖️ Compare PPT'}
             </button>
           </Card>
@@ -335,8 +341,14 @@ export default function ReportsCenter() {
                 {allMonthKeys.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
               </select>
             </div>
-            <button className={`${btnCompare} mt-4`} disabled={!cmpMonthA || !cmpMonthB || cmpMonthA === cmpMonthB || !!busy}
-              onClick={() => download({ compare: { type: 'month', from_month: cmpMonthA, to_month: cmpMonthB } }, 'mo-cmp')}>
+            <button className={`${btnCompare} mt-4`} disabled={!!busy}
+              onClick={() => {
+                if (!cmpMonthA || !cmpMonthB || cmpMonthA === cmpMonthB) {
+                  setError('Add and select data from two different months before comparing.')
+                  return
+                }
+                download({ compare: { type: 'month', from_month: cmpMonthA, to_month: cmpMonthB } }, 'mo-cmp')
+              }}>
               {busy === 'mo-cmp' ? 'Comparing…' : '⚖️ Compare PPT'}
             </button>
           </Card>
@@ -384,8 +396,14 @@ export default function ReportsCenter() {
                 {years.map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
-            <button className={`${btnCompare} mt-4`} disabled={!cmpYearA || !cmpYearB || cmpYearA === cmpYearB || !!busy}
-              onClick={() => download({ compare: { type: 'year', from_year: Number(cmpYearA), to_year: Number(cmpYearB) } }, 'yr-cmp')}>
+            <button className={`${btnCompare} mt-4`} disabled={!!busy}
+              onClick={() => {
+                if (!cmpYearA || !cmpYearB || cmpYearA === cmpYearB) {
+                  setError('Add and select data from two different years before comparing.')
+                  return
+                }
+                download({ compare: { type: 'year', from_year: Number(cmpYearA), to_year: Number(cmpYearB) } }, 'yr-cmp')
+              }}>
               {busy === 'yr-cmp' ? 'Comparing…' : '⚖️ Compare PPT'}
             </button>
           </Card>

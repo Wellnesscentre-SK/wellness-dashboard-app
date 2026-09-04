@@ -3,9 +3,22 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import include, path
 
+
+def index(request):
+    return JsonResponse({
+        "service": "Wellness Centre Analytics Dashboard",
+        "status": "ok",
+        "api": "/api/",
+        "admin": "/admin/",
+    })
+
+
 urlpatterns = [
+    path("", index, name="index"),
+    path("health/", index, name="health"),
     path("admin/", admin.site.urls),
     path("api/", include("wellness.urls")),
 ]

@@ -11,7 +11,10 @@ from pptx.dml.color import RGBColor
 from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION, XL_LABEL_POSITION
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt, Emu
-import config as C
+try:
+    from ppt_generator import config as C
+except ImportError:
+    import config as C
 
 
 def create_presentation():

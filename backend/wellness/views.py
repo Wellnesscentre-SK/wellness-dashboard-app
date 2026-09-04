@@ -1,6 +1,7 @@
 """API views."""
 
 import io
+import json
 import uuid
 from datetime import date, timedelta
 
@@ -13,9 +14,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from wellness.models import ImportEvent, Period
+from wellness.models import ActionPlan, ImportEvent, Period
 from wellness.permissions import IsAdmin
 from wellness.serializers import (
+    ActionPlanSerializer,
     ImportEventSerializer,
     PeriodSerializer,
     UserSerializer,
@@ -931,6 +933,171 @@ class AssistantUploadView(APIView):
         return Response({"rows": rows, "filename": file.name, "status": "processed"})
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# AI SUGGESTIONS & IMPROVEMENT MODULE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AISuggestionsView(APIView):
+    """Generate AI-powered improvement suggestions for wellness centre data."""
+
+    permission_classes = (IsAdmin,)
+
+    def post(self, request):
+        from wellness.services.ai_suggestions import (
+            generate_weekly_suggestions,
+            generate_monthly_suggestions,
+            generate_yearly_suggestions,
+            generate_comparison_suggestions,
+            generate_roadmap,
+        )
+        from wellness.services.insights import snapshot, active_periods
+
+        mode = str(request.data.get("mode") or "weekly").lower()
+
+        if mode == "weekly":
+            period_id = request.data.get("period_id")
+            if not period_id:
+                return _error("MISSING_PERIOD_ID", "period_id is required for weekly mode.")
+            period = Period.objects.filter(pk=period_id, superseded_by__isnull=True).first()
+            if not period:
+                return _error("PERIOD_NOT_FOUND", "Period not found.")
+            cur_snap = snapshot(period)
+            prev = immediately_previous_weekly(period) if period.report_type == Period.ReportType.WEEKLY else None
+            prev_snap = snapshot(prev) if prev else None
+            result = generate_weekly_suggestions(cur_snap, prev_snap)
+            result["period"] = {"id": period.id, "label": cur_snap["label"], "start": period.period_start.isoformat(), "end": period.period_end.isoformat()}
+            result["previous_period"] = {"id": prev.id, "label": prev_snap["label"]} if prev else None
+            result["mode"] = "weekly"
+
+        elif mode == "monthly":
+            year = request.data.get("year")
+            month = request.data.get("month")
+            if not year or not month:
+                return _error("MISSING_PARAMS", "year and month are required for monthly mode.")
+            try:
+                year, month = int(year), int(month)
+            except (TypeError, ValueError):
+                return _error("INVALID_PARAMS", "year and month must be integers.")
+            weekly_periods = list(
+                Period.objects.filter(
+                    report_type=Period.ReportType.WEEKLY,
+                    period_start__year=year,
+                    period_start__month=month,
+                    superseded_by__isnull=True,
+                ).order_by("period_start")
+            )
+            if not weekly_periods:
+                return _error("NO_DATA", f"No weekly reports found for {year}-{month:02d}.")
+            snaps = [snapshot(p) for p in weekly_periods]
+            result = generate_monthly_suggestions(snaps)
+            result["period"] = {"year": year, "month": month, "weeks_count": len(weekly_periods)}
+            result["mode"] = "monthly"
+
+        elif mode == "yearly":
+            year = request.data.get("year")
+            if not year:
+                return _error("MISSING_PARAMS", "year is required for yearly mode.")
+            try:
+                year = int(year)
+            except (TypeError, ValueError):
+                return _error("INVALID_PARAMS", "year must be an integer.")
+            monthly_periods = list(
+                Period.objects.filter(
+                    report_type=Period.ReportType.MONTHLY,
+                    period_start__year=year,
+                    superseded_by__isnull=True,
+                ).order_by("period_start")
+            )
+            if not monthly_periods:
+                return _error("NO_DATA", f"No monthly reports found for {year}.")
+            snaps = [snapshot(p) for p in monthly_periods]
+            result = generate_yearly_suggestions(snaps)
+            result["period"] = {"year": year, "months_count": len(monthly_periods)}
+            result["mode"] = "yearly"
+
+        elif mode == "comparison":
+            compare_type = str(request.data.get("compare_type") or "week").lower()
+            from_id = request.data.get("from_id")
+            to_id = request.data.get("to_id")
+            if not from_id or not to_id:
+                return _error("MISSING_PARAMS", "from_id and to_id are required for comparison mode.")
+            a = Period.objects.filter(pk=from_id, superseded_by__isnull=True).first()
+            b = Period.objects.filter(pk=to_id, superseded_by__isnull=True).first()
+            if not a or not b:
+                return _error("PERIOD_NOT_FOUND", "One or both periods not found.")
+            if b.period_start < a.period_start:
+                a, b = b, a
+            snap_a = snapshot(a)
+            snap_b = snapshot(b)
+            result = generate_comparison_suggestions(snap_a, snap_b, compare_type)
+            result["period"] = {
+                "a": {"id": a.id, "label": snap_a["label"]},
+                "b": {"id": b.id, "label": snap_b["label"]},
+            }
+            result["mode"] = "comparison"
+
+        else:
+            return _error("INVALID_MODE", "mode must be 'weekly', 'monthly', 'yearly', or 'comparison'.")
+
+        result["roadmap"] = generate_roadmap(result.get("suggestions", []))
+        return Response(result)
+
+
+class ActionPlanView(APIView):
+    """CRUD for AI Improvement Action Plans."""
+
+    permission_classes = (IsAdmin,)
+
+    def get(self, request):
+        qs = ActionPlan.objects.filter(created_by=request.user).order_by("-created_at")
+        source_type = request.query_params.get("source_type")
+        if source_type:
+            qs = qs.filter(source_type=source_type)
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        return Response(ActionPlanSerializer(qs, many=True).data)
+
+    def post(self, request):
+        serializer = ActionPlanSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(created_by=request.user)
+        return Response(serializer.data, status=http_status.HTTP_201_CREATED)
+
+    def patch(self, request, pk):
+        try:
+            plan = ActionPlan.objects.get(pk=pk, created_by=request.user)
+        except ActionPlan.DoesNotExist:
+            return _error("NOT_FOUND", "Action plan not found.")
+        serializer = ActionPlanSerializer(plan, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    def delete(self, request, pk):
+        try:
+            plan = ActionPlan.objects.get(pk=pk, created_by=request.user)
+        except ActionPlan.DoesNotExist:
+            return _error("NOT_FOUND", "Action plan not found.")
+        plan.delete()
+        return Response(status=http_status.HTTP_204_NO_CONTENT)
+
+
+class AIInsightsExportView(APIView):
+    """Export AI suggestions as JSON for PPT integration."""
+
+    permission_classes = (IsAdmin,)
+
+    def post(self, request):
+        from wellness.services.ai_suggestions import ppt_summary, generate_roadmap
+
+        result = request.data.get("result")
+        if not result:
+            return _error("MISSING_RESULT", "Provide the AI suggestions result.")
+        summary = ppt_summary(result)
+        return Response(summary)
+
+
 class ReportCenterView(APIView):
     """Separate Weekly / Monthly / Yearly report modules.
 
@@ -950,21 +1117,49 @@ class ReportCenterView(APIView):
 
         return Response(report_center.options())
 
+    def _maybe_append_ai(self, data_bytes, report_type, periods_for_ai, fmt="ppt"):
+        """Append AI slides to PPT if requested."""
+        if fmt != "ppt":
+            return data_bytes
+        try:
+            from wellness.services.ai_suggestions import (
+                generate_weekly_suggestions, generate_monthly_suggestions,
+                generate_yearly_suggestions, generate_roadmap,
+            )
+            from wellness.services.insights import snapshot
+            from wellness.services.reports.ppt import append_ai_slides
+
+            if report_type == "weekly" and periods_for_ai:
+                cur = snapshot(periods_for_ai[-1])
+                prev = snapshot(periods_for_ai[-2]) if len(periods_for_ai) >= 2 else None
+                result = generate_weekly_suggestions(cur, prev)
+                result["roadmap"] = generate_roadmap(result.get("suggestions", []))
+                label = f"{periods_for_ai[-1].period_start} to {periods_for_ai[-1].period_end}"
+                return append_ai_slides(data_bytes, result, label)
+            elif report_type == "monthly" and periods_for_ai:
+                snaps = [snapshot(p) for p in periods_for_ai]
+                result = generate_monthly_suggestions(snaps)
+                result["roadmap"] = generate_roadmap(result.get("suggestions", []))
+                label = f"{periods_for_ai[0].period_start.strftime('%B %Y')}"
+                return append_ai_slides(data_bytes, result, label)
+            elif report_type == "yearly" and periods_for_ai:
+                snaps = [snapshot(p) for p in periods_for_ai]
+                result = generate_yearly_suggestions(snaps)
+                result["roadmap"] = generate_roadmap(result.get("suggestions", []))
+                label = f"Year {periods_for_ai[0].period_start.year}"
+                return append_ai_slides(data_bytes, result, label)
+        except Exception as e:
+            import traceback, logging
+            logging.error("AI slides append failed: %s", e)
+            traceback.print_exc()
+        return data_bytes
+
     def post(self, request):
         from wellness.services.reports import report_center
         from wellness.services.persistence import log_audit
 
         def file_response(data_bytes, filename, content_type):
-            """Return a browser-readable Office download.
-
-            ``Content-Disposition`` and the Office ``Content-Type`` are not
-            CORS-safelisted headers.  The global CORS setting exposes them,
-            but setting the header on this response as well keeps downloads
-            correct when this endpoint is served behind a proxy that strips
-            the CORS middleware's response decoration.  The frontend also
-            validates the ZIP signature and has a filename fallback, so both
-            sides remain safe if a deployment has stale CORS configuration.
-            """
+            """Return a browser-readable Office download."""
             response = FileResponse(
                 io.BytesIO(data_bytes), as_attachment=True,
                 filename=filename, content_type=content_type,
@@ -993,6 +1188,29 @@ class ReportCenterView(APIView):
                 return _error("INVALID_COMPARISON", str(e))
             except Exception as e:
                 return _error("GENERATION_FAILED", str(e))
+
+            if fmt == "ppt":
+                try:
+                    from wellness.services.ai_suggestions import (
+                        generate_comparison_suggestions, generate_roadmap,
+                    )
+                    from wellness.services.insights import snapshot
+                    from wellness.services.reports.ppt import append_ai_slides
+
+                    from_id_val = compare.get("from_id")
+                    to_id_val = compare.get("to_id")
+                    a = Period.objects.filter(pk=from_id_val, superseded_by__isnull=True).first()
+                    b = Period.objects.filter(pk=to_id_val, superseded_by__isnull=True).first()
+                    if a and b:
+                        if b.period_start < a.period_start:
+                            a, b = b, a
+                        result = generate_comparison_suggestions(snapshot(a), snapshot(b), ctype)
+                        result["roadmap"] = generate_roadmap(result.get("suggestions", []))
+                        label = f"{a.period_start} vs {b.period_start}"
+                        data_bytes = append_ai_slides(data_bytes, result, label)
+                except Exception:
+                    pass
+
             log_audit(request.user, "report_generated", "period", 0,
                       {"format": "comparison_ppt", "filename": filename,
                        "module": f"report-center-{ctype}"})
@@ -1012,6 +1230,18 @@ class ReportCenterView(APIView):
             return _error("DATA_UNAVAILABLE", str(e))
         except Exception as e:
             return _error("GENERATION_FAILED", str(e))
+
+        if fmt == "ppt" and source_ids:
+            try:
+                periods_for_ai = list(Period.objects.filter(
+                    pk__in=source_ids, superseded_by__isnull=True
+                ).order_by("period_start"))
+                data_bytes = self._maybe_append_ai(data_bytes, report_type, periods_for_ai, fmt)
+            except Exception as e:
+                import traceback, logging
+                logging.error("AI slides outer append failed: %s", e)
+                traceback.print_exc()
+
         log_audit(request.user, "report_generated", "period",
                   source_ids[-1] if source_ids else 0,
                   {"format": fmt, "filename": filename,

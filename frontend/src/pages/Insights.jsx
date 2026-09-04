@@ -46,10 +46,19 @@ export default function Insights() {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    let alive = true
     client
       .get('/insights')
-      .then(({ data }) => setData(data))
-      .catch((e) => setError(apiError(e)))
+      .then(({ data: responseData }) => {
+        if (!responseData || typeof responseData !== 'object' || Array.isArray(responseData)) {
+          throw new Error('The insights service returned an invalid response.')
+        }
+        if (alive) setData(responseData)
+      })
+      .catch((e) => alive && setError(apiError(e)))
+    return () => {
+      alive = false
+    }
   }, [])
 
   const trend = useMemo(() => data?.trend || [], [data])
@@ -57,6 +66,16 @@ export default function Insights() {
 
   if (error) return <div className="text-sm text-red-600">{error}</div>
   if (!data) return <Spinner label="Running AI-style analysis…" />
+  if (!summary) {
+    return (
+      <Card title="AI data insights" subtitle="Automated analysis across all reporting periods">
+        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
+          <p className="text-sm font-medium text-slate-700">No reporting data available yet.</p>
+          <p className="mt-1 text-xs text-slate-500">Import or enter a reporting period to generate AI insights.</p>
+        </div>
+      </Card>
+    )
+  }
 
   const concernData = toChart(data.aggregates.concern, CONCERN_LABELS)
   const stakeData = toChart(data.aggregates.stakeholder, STAKEHOLDER_LABELS)

@@ -2,7 +2,7 @@
 
 from rest_framework import serializers
 
-from wellness.models import CaseRow, ImportEvent, Period, RawSubteamRow, SecondaryMetrics, User
+from wellness.models import ActionPlan, CaseRow, ImportEvent, Period, RawSubteamRow, SecondaryMetrics, User
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -174,3 +174,14 @@ def build_preview_payload(report, duplicate_period=None) -> dict:
         },
         "warnings": report.warnings,
     }
+
+
+class ActionPlanSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ActionPlan
+        fields = "__all__"
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.get_full_name() or obj.created_by.username if obj.created_by else None

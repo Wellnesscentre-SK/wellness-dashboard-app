@@ -4,10 +4,17 @@ SQLite by default; switch to Postgres via DATABASE_URL.
 """
 
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Ensure the project root (parent of backend/) is on sys.path so
+# ppt_generator can be imported from Django.
+PROJECT_ROOT = str(BASE_DIR.parent)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-&r9@v4qy$xmd!p=j_4z)-=36@keq+j_5@s8)e9wndbktx*8p0$")
 

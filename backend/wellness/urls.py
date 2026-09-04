@@ -32,5 +32,9 @@ urlpatterns = [
     path("reports/build", views.ReportCenterView.as_view(), name="report-center"),
     path("assistant/chat", views.AssistantView.as_view(), name="assistant-chat"),
     path("assistant/upload", views.AssistantUploadView.as_view(), name="assistant-upload"),
+    path("ai/suggestions", views.AISuggestionsView.as_view(), name="ai-suggestions"),
+    path("ai/action-plan", views.ActionPlanView.as_view(), name="action-plan"),
+    path("ai/action-plan/<int:pk>", views.ActionPlanView.as_view(), name="action-plan-detail"),
+    path("ai/export", views.AIInsightsExportView.as_view(), name="ai-export"),
 ]
 

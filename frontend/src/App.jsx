@@ -11,6 +11,7 @@ import ImportHistory from './pages/ImportHistory'
 import Insights from './pages/Insights'
 import DataAnalysisAI from './pages/DataAnalysisAI'
 import ReportsCenter from './pages/ReportsCenter'
+import AISuggestions from './pages/AISuggestions'
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth()
@@ -51,6 +52,7 @@ export default function App() {
             <Route path="/insights" element={<Insights />} />
             <Route path="/data-analysis" element={<DataAnalysisAI />} />
             <Route path="/ai-analysis" element={<DataAnalysisAI />} />
+            <Route path="/ai-suggestions" element={<AISuggestions />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

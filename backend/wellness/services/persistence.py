@@ -155,8 +155,7 @@ def save_import(report, user, filename: str, raw_bytes: bytes, replace: bool = F
         for row in report.rows:
             if row.status == "rejected":
                 rejected += 1
-                continue
-            if row.status == "warning":
+            elif row.status == "warning":
                 warned += 1
             else:
                 imported += 1
@@ -373,32 +372,28 @@ def _reason_for(checks) -> str:
 
 
 def _coerce_cell(value, field: str):
-    if value is None:
+    if value is None or isinstance(value, bool):
         return 0, None
-    if isinstance(value, bool):
-        return 0, f"{field}: value is missing or not a number."
     if isinstance(value, str):
         s = value.strip()
         if s == "" or s == "-":
-            return 0, f"{field}: value is missing or not a number."
+            return 0, None
         try:
             n = int(float(s))
             if n < 0:
                 return 0, f"{field}: negative values aren't allowed."
             return n, None
         except (ValueError, OverflowError):
-            return 0, f"{field}: value is missing or not a number."
+            return 0, None
     if isinstance(value, float):
         if value < 0:
             return 0, f"{field}: negative values aren't allowed."
-        if not value.is_integer():
-            return 0, f"{field}: non-integer value isn't allowed."
         return int(value), None
     if isinstance(value, int):
         if value < 0:
             return 0, f"{field}: negative values aren't allowed."
         return value, None
-    return 0, f"{field}: value is missing or not a number."
+    return 0, None
 
 
 def log_audit(actor, action: str, target_type: str, target_id=None, details=None) -> AuditLog:

@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import client, { apiError } from '../api/client'
 import { Card, ErrorBox, Spinner, StatusBadge } from '../components/ui'
 
@@ -35,6 +36,7 @@ export default function Import() {
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const inputRef = useRef(null)
+  const navigate = useNavigate()
 
   const onFileChange = (e) => {
     setFile(e.target.files[0] || null)
@@ -75,13 +77,14 @@ export default function Import() {
         setPreview(null)
         setFile(null)
         if (inputRef.current) inputRef.current.value = ''
+        navigate(`/reports/manual?period=${data.period_id}`)
       } catch (err) {
         setError(apiError(err))
       } finally {
         setConfirming(false)
       }
     },
-    [preview],
+    [preview, navigate],
   )
 
   const hasProblems = preview && preview.counts.rejected > 0

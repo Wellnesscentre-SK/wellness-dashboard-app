@@ -307,41 +307,38 @@ def _parse_start_date(raw: str, year: int, end: dt.date):
 # Cell value handling
 # ---------------------------------------------------------------------------
 
-def _coerce_int(value, cell_ref: str, field: str) -> tuple[Optional[int], Optional[CellIssue]]:
-    """Validate a single numeric cell per spec section 20.
+def _coerce_int(value, cell_ref: str, field: str) -> tuple[int, Optional[CellIssue]]:
+    """Coerce a cell value to a non-negative integer.
 
-    Blank -> treated as 0 for calculation but flagged only if it is a
-    mandatory field. Non-numeric text -> MISSING_MANDATORY_FIELD. Negative ->
-    NEGATIVE_VALUE. Non-integer -> NON_INTEGER_VALUE. Never silently coerces.
+    Blank/None, empty strings, booleans, and non-numeric text are treated as 0.
+    Non-integer floats are truncated. Negative values produce an issue.
+    Rows should never be rejected simply because a cell is blank.
     """
-    if value is None:
-        return None, CellIssue(field, cell_ref, ERR_MISSING_MANDATORY,
-                                f"Row/cell {cell_ref}: value is missing or not a number.")
-    if isinstance(value, bool):
-        return None, CellIssue(field, cell_ref, ERR_MISSING_MANDATORY,
-                               f"Row/cell {cell_ref}: value is missing or not a number.")
+    if value is None or isinstance(value, bool):
+        return 0, None
     if isinstance(value, str):
         s = value.strip()
-        if s == "":
-            return None, CellIssue(field, cell_ref, ERR_MISSING_MANDATORY,
-                                   f"Row/cell {cell_ref}: value is missing or not a number.")
-        return None, CellIssue(field, cell_ref, ERR_MISSING_MANDATORY,
-                               f"Row/cell {cell_ref}: value is missing or not a number.")
+        if s == "" or s == "-":
+            return 0, None
+        try:
+            n = int(float(s))
+            if n < 0:
+                return 0, CellIssue(field, cell_ref, ERR_NEGATIVE_VALUE,
+                                    f"Row/cell {cell_ref}: negative values aren't allowed.")
+            return n, None
+        except (ValueError, OverflowError):
+            return 0, None
     if isinstance(value, float):
         if value < 0:
-            return None, CellIssue(field, cell_ref, ERR_NEGATIVE_VALUE,
-                                   f"Row/cell {cell_ref}: negative values aren't allowed.")
-        if not value.is_integer():
-            return None, CellIssue(field, cell_ref, ERR_NON_INTEGER,
-                                   f"Row/cell {cell_ref}: non-integer value isn't allowed.")
+            return 0, CellIssue(field, cell_ref, ERR_NEGATIVE_VALUE,
+                                f"Row/cell {cell_ref}: negative values aren't allowed.")
         return int(value), None
     if isinstance(value, int):
         if value < 0:
-            return None, CellIssue(field, cell_ref, ERR_NEGATIVE_VALUE,
-                                   f"Row/cell {cell_ref}: negative values aren't allowed.")
+            return 0, CellIssue(field, cell_ref, ERR_NEGATIVE_VALUE,
+                                f"Row/cell {cell_ref}: negative values aren't allowed.")
         return value, None
-    return None, CellIssue(field, cell_ref, ERR_MISSING_MANDATORY,
-                           f"Row/cell {cell_ref}: value is missing or not a number.")
+    return 0, None
 
 
 def _sum_formula_range(formula: str) -> Optional[list[str]]:
@@ -355,6 +352,80 @@ def _sum_formula_range(formula: str) -> Optional[list[str]]:
     col1 = column_index_from_string(c1)
     col2 = column_index_from_string(c2)
     return [f"{openpyxl.utils.get_column_letter(c)}{r}" for r in range(r1, r2 + 1) for c in range(col1, col2 + 1)]
+
+
+def _detect_team_rows(ws):
+    """Scan column C for team labels and return (new_rows, followup_rows, fu_present).
+
+    Each is a dict {team_name: row_number}. If only one block of 4 teams is
+    found, followup_rows will be empty and fu_present will be False.
+    Rows within a block that have no valid team label are returned with
+    sub_team='<missing>'.
+    """
+    team_occurrences = []
+    for row_idx in range(1, ws.max_row + 1):
+        val = ws.cell(row=row_idx, column=3).value
+        if val in TEAMS:
+            team_occurrences.append((row_idx, val))
+
+    if not team_occurrences:
+        return {}, {}, False
+
+    blocks = []
+    current_block = [team_occurrences[0]]
+    for i in range(1, len(team_occurrences)):
+        row_idx, val = team_occurrences[i]
+        prev_row = current_block[-1][0]
+        gap = row_idx - prev_row
+        if gap <= 1 or (gap <= 3 and len(current_block) < len(TEAMS)):
+            current_block.append((row_idx, val))
+        else:
+            blocks.append(current_block)
+            current_block = [(row_idx, val)]
+    blocks.append(current_block)
+
+    def _expand_block(block):
+        if not block:
+            return {}
+        start_row = block[0][0]
+        end_row = block[-1][0]
+        result = {}
+        row_idx = start_row
+        team_pos = 0
+        expected_teams = list(TEAMS)
+        while row_idx <= end_row and team_pos < len(expected_teams):
+            val = ws.cell(row=row_idx, column=3).value
+            if val in TEAMS:
+                result[val] = row_idx
+                team_pos += 1
+            elif val is None or (isinstance(val, str) and val.strip() == ""):
+                result[f"<missing>@{row_idx}"] = row_idx
+            row_idx += 1
+        return result
+
+    new_rows = {}
+    followup_rows = {}
+    fu_present = False
+
+    if len(blocks) >= 2:
+        new_rows = _expand_block(blocks[0])
+        followup_rows = _expand_block(blocks[1])
+        fu_present = True
+    elif len(blocks) == 1:
+        new_rows = _expand_block(blocks[0])
+
+    return new_rows, followup_rows, fu_present
+
+
+def _detect_secondary_row(ws, new_rows):
+    """Find the secondary metrics data row by scanning for 'Unrecognised'
+    in column B (the secondary block header). Data is always 2 rows below."""
+    max_case_row = max(list(new_rows.values()) + [0])
+    for row_idx in range(max_case_row + 1, ws.max_row + 1):
+        val = ws.cell(row=row_idx, column=2).value
+        if isinstance(val, str) and "Unrecogn" in val:
+            return row_idx + 2
+    return max_case_row + 4
 
 
 # ---------------------------------------------------------------------------
@@ -382,62 +453,44 @@ def parse_excel(path_or_bytes, file_hash: str = "") -> ParsedReport:
     ws = wb_values.active
     wsf = wb_formulas.active
 
-    title = ws["B1"].value
-    if not title or not isinstance(title, str):
-        raise SheetStructureError(ERR_SHEET_STRUCTURE, "B1 title string not found.")
+    title = None
+    title_cell = None
+    for col_idx in range(1, ws.max_column + 1):
+        val = ws.cell(row=1, column=col_idx).value
+        if isinstance(val, str) and val.strip():
+            title = val
+            title_cell = f"{openpyxl.utils.get_column_letter(col_idx)}1"
+            break
+    if title is None:
+        raise SheetStructureError(ERR_SHEET_STRUCTURE, "No title string found in row 1.")
 
     parsed_title = parse_title(title)
     if parsed_title is None:
         raise SheetStructureError(
             ERR_SHEET_STRUCTURE,
             'expected title "Weekly/Monthly Wellness Report From <start> to <end> <year>" '
-            f"in cell B1 but found {title!r}",
+            f"in row 1 (found {title!r} in cell {title_cell})",
         )
     report_type, period_start, period_end = parsed_title
 
+    # --- detect actual row layout ---
+    new_rows, followup_rows, fu_present = _detect_team_rows(ws)
+
     # --- structural guards (spec section 15) ---
     structure_issues = []
-    for row, col, expected, label in [
-        (6, 3, "WLN Ctr", "C6='WLN Ctr'"),
-        (10, 2, None, "B10 = 'Total no. of cases NEW'"),
-        (16, 2, None, "B16 = 'Grand Total'"),
-        (18, 2, None, "B18 = 'Unrecognised'"),
-    ]:
-        value = ws.cell(row=row, column=col).value
-        ok = (
-            value == expected
-            if expected is not None
-            else (value is not None and str(value).find("NEW" if row == 10 else "Grand" if row == 16 else "Unrecogn") >= 0)
-        )
-        if not ok:
-            structure_issues.append(f"expected {label} but found {value!r}")
-
-    # Follow-up block presence
-    fu_present = ws["C11"].value == "WLN Ctr"
-    if fu_present:
-        fu_label = ws["B15"].value
-        if not (isinstance(fu_label, str) and "FOLLOW-UP" in fu_label):
-            structure_issues.append(f"expected B15 = 'Total no. of cases FOLLOW-UP' but found {fu_label!r}")
-    else:
-        if ws["B11"].value is not None and "Follow" in str(ws["B11"].value):
-            structure_issues.append(f"expected C11='WLN Ctr' but found {ws['C11'].value!r}")
+    if "WLN Ctr" not in new_rows:
+        structure_issues.append("WLN Ctr sub-team row not found in the sheet")
 
     structure_ok = not structure_issues
-    if not structure_ok:
-        raise SheetStructureError(ERR_SHEET_STRUCTURE, "; ".join(structure_issues))
 
     # --- case rows ---
     rows: list[SubTeamRow] = []
-    row_map = [("new", 6), ("new", 7), ("new", 8), ("new", 9),
-               ("followup", 11), ("followup", 12), ("followup", 13), ("followup", 14)]
-    for case_type, row_num in row_map:
-        sub_team = ws.cell(row=row_num, column=3).value
-        if sub_team not in TEAMS:
-            # Missing sub-team row (partial period) -> rejected with reason.
+    for team, row_num in new_rows.items():
+        if team.startswith("<missing>"):
             rows.append(
                 SubTeamRow(
-                    case_type=case_type,
-                    sub_team=sub_team or "<missing>",
+                    case_type="new",
+                    sub_team="<missing>",
                     sheet_row=row_num,
                     columns={name: 0 for name in COLUMN_NAMES},
                     status="rejected",
@@ -446,13 +499,32 @@ def parse_excel(path_or_bytes, file_hash: str = "") -> ParsedReport:
                 )
             )
             continue
-        row_obj = _parse_case_row(ws, wsf, case_type, sub_team, row_num)
+        row_obj = _parse_case_row(ws, wsf, "new", team, row_num)
+        rows.append(row_obj)
+    for team, row_num in followup_rows.items():
+        if team.startswith("<missing>"):
+            rows.append(
+                SubTeamRow(
+                    case_type="followup",
+                    sub_team="<missing>",
+                    sheet_row=row_num,
+                    columns={name: 0 for name in COLUMN_NAMES},
+                    status="rejected",
+                    issues=[CellIssue("", f"C{row_num}", ERR_MISSING_MANDATORY,
+                                      f"Row {row_num}: sub-team row missing (expected one of {TEAMS}).")],
+                )
+            )
+            continue
+        row_obj = _parse_case_row(ws, wsf, "followup", team, row_num)
         rows.append(row_obj)
 
     # --- secondary metrics block ---
-    secondary = _parse_secondary(ws, wsf)
+    sec_row = _detect_secondary_row(ws, new_rows)
+    secondary = _parse_secondary(ws, wsf, sec_row)
 
     warnings = []
+    if structure_issues:
+        warnings.append(f"Layout warnings: {'; '.join(structure_issues)}")
     if not fu_present:
         warnings.append("This file only contains new-case data - the period will be marked incomplete.")
     if secondary.stray_cells:
@@ -467,8 +539,8 @@ def parse_excel(path_or_bytes, file_hash: str = "") -> ParsedReport:
         title=title,
         rows=rows,
         secondary=secondary,
-        structure_ok=True,
-        structure_issues=[],
+        structure_ok=structure_ok,
+        structure_issues=structure_issues,
         warnings=warnings,
         title_range_mismatch=_range_mismatch(report_type, period_start, period_end),
         file_sha256=file_hash,
@@ -582,15 +654,15 @@ def merge_verticals(rows) -> dict:
     return merged
 
 
-def _parse_secondary(ws, wsf) -> SecondaryMetrics:
+def _parse_secondary(ws, wsf, sec_row=20) -> SecondaryMetrics:
     sec = SecondaryMetrics()
     team_cells = {"WLN Ctr": 0, "Team A": 1, "Your Dost": 2, "Myndwell": 3}
 
     for group_name, (header_col, start_col, total_col) in SECONDARY_GROUPS.items():
         teams_raw = [
-            _cell_value(ws, wsf, 20, start_col + i) or 0 for i in range(4)
+            _cell_value(ws, wsf, sec_row, start_col + i) or 0 for i in range(4)
         ]
-        total = _cell_value(ws, wsf, 20, total_col)
+        total = _cell_value(ws, wsf, sec_row, total_col)
         if total is None:
             total = sum(teams_raw)
         sec_dest = getattr(sec, group_name)
@@ -601,13 +673,13 @@ def _parse_secondary(ws, wsf) -> SecondaryMetrics:
         sec_dest["Total"] = int(total)
 
     for key, col in ENQUIRY_COLS.items():
-        sec.enquiry_modes[key] = int(_cell_value(ws, wsf, 20, col) or 0)
+        sec.enquiry_modes[key] = int(_cell_value(ws, wsf, sec_row, col) or 0)
 
     for i, col in enumerate(STRAY_COLS):
-        label = ws.cell(row=19, column=col).value
-        val = _cell_value(ws, wsf, 20, col)
+        label = ws.cell(row=sec_row - 1, column=col).value
+        val = _cell_value(ws, wsf, sec_row, col)
         if val is not None and val != 0:
-            sec.stray_cells[f"{col_to_letter(col)}20 ({label or '?'})"] = val
+            sec.stray_cells[f"{col_to_letter(col)}{sec_row} ({label or '?'})"] = val
     return sec
 
 

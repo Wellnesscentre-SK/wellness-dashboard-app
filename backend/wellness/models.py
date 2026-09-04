@@ -214,3 +214,42 @@ class AuditLog(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
+
+
+class ActionPlan(models.Model):
+    class Status(models.TextChoices):
+        NOT_STARTED = "not_started", "Not Started"
+        IN_PROGRESS = "in_progress", "In Progress"
+        COMPLETED = "completed", "Completed"
+        DEFERRED = "deferred", "Deferred"
+
+    class Priority(models.TextChoices):
+        HIGH = "HIGH", "High"
+        MEDIUM = "MEDIUM", "Medium"
+        LOW = "LOW", "Low"
+
+    title = models.CharField(max_length=255)
+    category = models.CharField(max_length=50, blank=True, default="")
+    priority = models.CharField(max_length=10, choices=Priority.choices, default=Priority.MEDIUM)
+    recommendation = models.TextField(blank=True, default="")
+    evidence = models.TextField(blank=True, default="")
+    action = models.TextField(blank=True, default="")
+    expected_result = models.TextField(blank=True, default="")
+    responsible_person = models.CharField(max_length=255, blank=True, default="")
+    responsible_team = models.CharField(max_length=255, blank=True, default="")
+    start_date = models.DateField(null=True, blank=True)
+    target_date = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.NOT_STARTED)
+    actual_result = models.TextField(blank=True, default="")
+    source_type = models.CharField(max_length=20, blank=True, default="")
+    source_period_id = models.IntegerField(null=True, blank=True)
+    source_mode = models.CharField(max_length=20, blank=True, default="")
+    created_by = models.ForeignKey("User", null=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"[{self.priority}] {self.title}"

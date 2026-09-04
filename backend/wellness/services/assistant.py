@@ -36,13 +36,15 @@ from wellness.models import CaseRow, Period, SecondaryMetrics
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "openai/gpt-oss-20b:free"
-# Free-tier models are individually rate-limited; fall through this chain on
-# 402/429/404 so a single busy model doesn't break the assistant.
+DEFAULT_MODEL = "minimax/minimax-m3:free"
+# Free-tier models churn quickly (de-listed, rate-limited, or turned paid).
+# minimax/m3 returns clean, fast insight text; fall through this chain on
+# 402/429/404/408; "openrouter/free" is a stable catch-all.
 MODEL_FALLBACKS = [
     DEFAULT_MODEL,
-    "google/gemma-4-31b-it:free",
     "nvidia/nemotron-3.5-lightning:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "openrouter/free",
 ]
 
 
@@ -91,7 +93,7 @@ def _chat_raw(messages: list, model: str = None, temperature: float = 0.3,
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = ""

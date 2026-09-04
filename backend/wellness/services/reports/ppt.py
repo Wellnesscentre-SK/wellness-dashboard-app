@@ -923,3 +923,30 @@ def build_ai_comparison(period_a, period_b, insights=None, insert_into_ppt=True,
 def build_weekly(period_a: Period, period_b: Period, insights=None) -> bytes:
     from wellness.services.reports.reference_ppt import build_weekly_comparison as build_reference_weekly
     return build_reference_weekly(period_a, period_b)
+
+
+# ═══════════════════════ AI SLIDE APPENDER ═══════════════════════════════════
+
+def append_ai_slides(data_bytes: bytes, ai_result: dict, period_label: str = "") -> bytes:
+    """Append AI insight slides to an existing PPTX byte stream.
+
+    Parameters
+    ----------
+    data_bytes : bytes
+        Serialised PPTX from any build_* function.
+    ai_result : dict
+        Output of ai_suggestions.generate_*_suggestions().
+    period_label : str
+        Human-readable label for the period.
+    """
+    if not ai_result or not ai_result.get("suggestions"):
+        return data_bytes
+
+    from pptx import Presentation as _P
+    from ppt_generator.ai_slides import add_ai_slides as _add
+
+    prs = _P(io.BytesIO(data_bytes))
+    _add(prs, ai_result, period_label)
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
